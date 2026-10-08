@@ -11,9 +11,24 @@ using static hexagonest.Tools.Utilities;
 
 namespace hexagonest.Tools
 {
+	// used by AircraftSelector
+	public class WindTunnel_Target : AircraftSelector.Target
+	{
+		public override UnityEngine.Object aircraft_definition { get; set; }
+		public override GameObject aircraft_prefab { get; set; }
+		public override Type target_window => typeof(WindTunnel);
+		public override string target_name => "Wind Tunnel";
+		public static WindTunnel_Target instance = new WindTunnel_Target();
+		private WindTunnel_Target() {}
+	}
+
 	public class WindTunnel : EditorWindow
 	{
-		static AircraftData? current_aircraft = null;
+		static UnityEngine.Object aircraft_definition = null;
+		static GameObject current_prefab;
+		static AircraftData current_aircraft;
+
+		static bool in_wind_tunnel = false; // some features disabled in prefabs to avoid potentially messing with them
 
 		enum simulation_mode {
 			angle_sweep, // choose between alpha or beta
@@ -33,12 +48,15 @@ namespace hexagonest.Tools
 		static readonly string[] angle_mode_names = { "Alpha", "Beta" };
 		static angle_mode angle_sweep_mode = angle_mode.alpha;
 
+		// rerun simulation when parameters are changed
+		static bool simulate_on_change = true;
+
 		// aircraft configuration
 		static bool show_aircraft_cfg = false;
 		static float fuel_level = 30f;
 
 		// state tracking for inputs
-		static bool using_airspeed = true, using_mach = false;
+		static bool using_airspeed = true; // true if airspeed (m/s or converted) was last changed, false if mach was last changed
 
 		// simulation parameters
 		static ValueWithUnit airspeed_min = new ValueWithUnit("Airspeed", "speed", 100f, "m/s", "km/h");
@@ -65,12 +83,11 @@ namespace hexagonest.Tools
 		static float beta_max = 45f;
 		static float beta_fixed = 0f;
 
-
 		static int simulation_steps = 81;
 
 		static List<graph_series> simulation_series = new List<graph_series>();
 		static bool has_simulation_data = false;
-		static bool graph_updated = false;
+		//static bool graph_updated = false;
 
 		static Rect? graph_rect;
 
@@ -79,7 +96,7 @@ namespace hexagonest.Tools
 			GameObject prefab_root = SimEnvironment.check_in_prefab("Wind tunnel");
 			if (prefab_root == null) return;
 
-			AircraftData? aircraft = AircraftUtils.get_data_from_prefab(prefab_root);
+			AircraftData aircraft = AircraftUtils.get_data_from_prefab(prefab_root);
 
 			if (prefab_root != null && aircraft != null)
 			{
@@ -88,20 +105,30 @@ namespace hexagonest.Tools
 			}
 		}
 
+		// effectively replaces load_aircraft() but intentionally loading now
+		static void load_aircraft(GameObject aircraft_root)
+		{
+			current_aircraft = new AircraftData(aircraft_root);
+			current_prefab = aircraft_root;
+
+			fuel_level = current_aircraft.fuel_fraction;
+		}
+
 		[MenuItem("HexTools/Wind tunnel")]
 		static void open()
 		{
-			find_aircraft();
-
-			if (current_aircraft != null)
-			{
-				var window = GetWindow<WindTunnel>("Wind Tunnel");
-				window.minSize = new Vector2(600f, 400f);
-			}
+			AircraftSelector.open_with_target(WindTunnel_Target.instance);
+			//find_aircraft();
+			//if (current_aircraft != null)
+			//{
+			//	var window = GetWindow<WindTunnel>("Wind Tunnel");
+			//	window.minSize = new Vector2(600f, 400f);
+			//}
 		}
 
-		private void aircraft_panel(AircraftData aircraft)
+		private bool aircraft_panel(AircraftData aircraft)
 		{
+			bool value_changed = false;
 			EditorGUILayout.BeginVertical("GroupBox");
 			EditorGUILayout.LabelField("Aircraft configuration", EditorStyles.boldLabel);
 
@@ -120,7 +147,11 @@ namespace hexagonest.Tools
 				EditorGUILayout.LabelField($"{aircraft.physics.fuel_mass}kg / {aircraft.physics.max_fuel_mass}kg", GUILayout.Width(120f));
 				EditorGUI.BeginChangeCheck();
 				fuel_level = EditorGUILayout.Slider(fuel_level, 0f, 100f);
-				if (EditorGUI.EndChangeCheck()) aircraft.set_fuel_fraction(fuel_level / 100f);
+				if (EditorGUI.EndChangeCheck())
+				{
+					aircraft.set_fuel_fraction(fuel_level / 100f);
+					value_changed = true;
+				}
 			EditorGUILayout.EndHorizontal();
 			
 			EditorGUILayout.BeginHorizontal();
@@ -139,7 +170,11 @@ namespace hexagonest.Tools
 					EditorGUILayout.LabelField($"{group.mass}kg", GUILayout.Width(120f), GUILayout.ExpandWidth(true));
 					EditorGUI.BeginChangeCheck();
 					int new_selection = EditorGUILayout.Popup(group.currently_mounted, group.option_names, GUILayout.Width(240f), GUILayout.ExpandWidth(true));
-					if (EditorGUI.EndChangeCheck()) aircraft.hardpoint_manager.set_group_mounted_option(group.manager_index, new_selection);
+					if (EditorGUI.EndChangeCheck())
+					{
+						aircraft.hardpoint_manager.set_group_mounted_option(group.manager_index, new_selection);
+						value_changed = true;
+					}
 					EditorGUILayout.EndHorizontal();
 				}
 			}
@@ -147,42 +182,99 @@ namespace hexagonest.Tools
 
 			EditorGUILayout.EndFoldoutHeaderGroup();
 			EditorGUILayout.EndVertical();
-		}
 
-		static UnityEngine.Object aircraft_def;
+			return value_changed;
+		}
 
 		private void OnGUI()
 		{
-			aircraft_def = EditorGUILayout.ObjectField("Aircraft template", aircraft_def, game_type("AircraftDefinition"), false);
-			if (current_aircraft == null) {
-				EditorGUILayout.HelpBox("No aircraft loaded", MessageType.Info);
+			EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+			if (GUILayout.Button("Reset", EditorStyles.toolbarButton))
+			{
+				Debug.Log("Reset");
+			}
+			simulate_on_change = GUILayout.Toggle(simulate_on_change, "Run on change", EditorStyles.toolbarButton);
+			GUILayout.FlexibleSpace();
+			GUILayout.Label(in_wind_tunnel ? "Wind tunnel" : "Prefab (some features disabled)", "ToolbarLabel");
+			
+			using (new EditorGUI.DisabledScope(current_aircraft == null))
+			{
+				if (GUILayout.Button("Mode select", EditorStyles.toolbarButton))
+				{
+					current_aircraft = null;
+				}
+			}
+			EditorGUILayout.EndHorizontal();
 
-				if (GUILayout.Button("Check again", GUILayout.Height(28)))
-					find_aircraft();
+			var selector_data = WindTunnel_Target.instance;
+			GameObject selected_prefab = selector_data.aircraft_prefab;
+
+			if (selected_prefab != null && selected_prefab != current_prefab)
+			{
+				current_aircraft = null;
+			}
+
+			if (current_aircraft == null) {
+				if (selected_prefab != null)
+				{
+					EditorGUILayout.LabelField($"An aircraft ({selected_prefab.name}) is available.");
+					EditorGUILayout.Space();
+
+					EditorGUILayout.BeginHorizontal();
+					EditorGUILayout.LabelField("Bring to wind tunnel scene (will replace whatever's there)");
+					if (GUILayout.Button("Test in wind tunnel scene", "AC Button"))//GUILayout.Height(28)
+						Debug.Log("lmao doesn't do anything yet");
+					EditorGUILayout.EndHorizontal();
+
+					EditorGUILayout.Space();
+					EditorGUILayout.BeginHorizontal();
+					EditorGUILayout.LabelField("Test in prefab (visualizations will be unavailable)");
+					if (GUILayout.Button("Test in prefab", "AC Button"))//GUILayout.Height(28)
+					{
+						bool is_in_prefab = (SimEnvironment.check_in_prefab_no_dialog() == selected_prefab);
+						if (!is_in_prefab) { AssetDatabase.OpenAsset(selected_prefab); Debug.Log("tried it"); }
+						load_aircraft(selected_prefab);
+					}
+					EditorGUILayout.EndHorizontal();
+				}
+				else
+				{
+					EditorGUILayout.LabelField("Selecting an aircraft seems to have gone wrong.");
+					EditorGUILayout.LabelField("Close this window and reopen it via the toolbar.");
+
+					GameObject we_might_be_in_a_prefab_anyway = SimEnvironment.check_if_prefab_is_aircraft();
+					if (we_might_be_in_a_prefab_anyway != null)
+					{
+						if (GUILayout.Button("Or just use the prefab you're in", "AC Button"))//GUILayout.Height(28)
+							load_aircraft(we_might_be_in_a_prefab_anyway);
+					}
+				}
 				return;
 			}
 			AircraftData aircraft = (AircraftData)current_aircraft;
+			in_wind_tunnel = SimEnvironment.check_in_sim_scene(aircraft);
 
 			//current_mode = EditorGUILayout.Popup(current_mode, modes);
 			current_mode = (simulation_mode)GUILayout.Toolbar((int)current_mode, mode_names);
 			//EditorGUILayout.Space();
 
-			aircraft_panel(aircraft);
+			bool cfg_changed = aircraft_panel(aircraft);
 			
 			//EditorGUILayout.Space();
 
 			EditorGUILayout.BeginVertical("GroupBox");
 			EditorGUILayout.LabelField("Simulation parameters", EditorStyles.boldLabel);
+			bool params_changed = cfg_changed;
 			switch (current_mode)
 			{
 				case simulation_mode.angle_sweep:
 					(float rho, float mach) = Simulation.isa_atm(altitude_fixed.current_value);
 
 					bool airspeed_changed = airspeed_fixed.present();
-					if (airspeed_changed) { mach_fixed.update_value(airspeed_fixed.current_value / mach); using_airspeed = true; using_mach = false; }
+					if (airspeed_changed) { mach_fixed.update_value(airspeed_fixed.current_value / mach); using_airspeed = true; }
 
 					bool mach_changed = mach_fixed.present_one("M", mach);
-					if (mach_changed) { airspeed_fixed.update_value(mach_fixed.current_value * mach); using_airspeed = false; using_mach = true;  }
+					if (mach_changed) { airspeed_fixed.update_value(mach_fixed.current_value * mach); using_airspeed = false; }
 
 					bool altitude_changed = altitude_fixed.present();
 					if (altitude_changed)
@@ -198,7 +290,7 @@ namespace hexagonest.Tools
 					//EditorGUILayout.LabelField("Dyn. pressure", $"{0.5 * rho * (airspeed_fixed.current_value * airspeed_fixed.current_value)}Pa");
 					//EditorGUILayout.EndHorizontal();
 
-					bool params_changed = false;
+					params_changed = params_changed || airspeed_changed || mach_changed || altitude_changed || cfg_changed;
 					//EditorGUILayout.BeginHorizontal();
 					//EditorGUILayout.LabelField("Sweep mode");
 					//angle_sweep_mode = (angle_mode)GUILayout.Toolbar((int)angle_sweep_mode, angle_mode_names);
@@ -233,11 +325,16 @@ namespace hexagonest.Tools
 					break;
 			}
 
-			using (new EditorGUI.DisabledScope(current_mode == null))
+			if (simulate_on_change && params_changed)
 			{
+				run_simulation();
+			}
+
+			//using (new EditorGUI.DisabledScope(current_mode == null))
+			//{
 				if (GUILayout.Button("Simulate", GUILayout.Height(28)))
 					run_simulation();
-			}
+			//}
 			EditorGUILayout.EndVertical();
 			//EditorGUILayout.Space();
 
@@ -259,14 +356,14 @@ namespace hexagonest.Tools
 			//if (graph_updated) {
 			//	Debug.Log($"Graph: xmin {x_min}, xmax {x_max}, ymin {y_min}, ymax {y_max}");
 			//}
-			graph_updated = false;
+			//graph_updated = false;
 			this.Repaint();
 		}
 
 
 		private void run_simulation()
 		{
-			find_aircraft();
+			//find_aircraft();
 			if (current_aircraft == null) { Debug.LogError("No aircraft selected, or no prefab available"); return; }
 
 			List<(string name, List<Vector2> points, Color color)> new_series = new List<(string name, List<Vector2> points, Color color)>();
@@ -345,7 +442,7 @@ namespace hexagonest.Tools
 
 			simulation_series = series_compiled;
 			has_simulation_data = true;
-			graph_updated = true;
+			//graph_updated = true;
 
 			update_results();
 		}

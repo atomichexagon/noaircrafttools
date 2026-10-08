@@ -5,6 +5,8 @@ using UnityEngine.SceneManagement;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 
+using static hexagonest.Tools.Utilities;
+
 
 namespace hexagonest.Tools
 {
@@ -62,7 +64,7 @@ namespace hexagonest.Tools
 		public static (Vector3 total, Vector3 lift, Vector3 drag, Vector3 torque) aircraft_forces(AircraftData aircraft, float v, float h, float alpha, float beta, bool log_spam = false)
 		{
 			(float rho, float mach) = isa_atm(h);
-			Vector3 v_dir = new Vector3(Mathf.Sin(beta), -Mathf.Sin(alpha), Mathf.Cos(alpha));
+			Vector3 v_dir = new Vector3(Mathf.Sin(-beta), -Mathf.Sin(alpha), Mathf.Cos(alpha));
 			Vector3 vel = v * v_dir;
 			float airspeed_sq = v * v;
 
@@ -73,8 +75,8 @@ namespace hexagonest.Tools
 			Vector3 sum_lift = Vector3.zero, sum_drag = Vector3.zero, sum_torque = Vector3.zero;
 
 			// force position * force magnitude
-			Vector3 avg_lift = Vector3.zero, avg_drag = Vector3.zero, avg_torque = Vector3.zero;
-			float abs_lift = 0, abs_drag = 0, abs_torque = 0;
+			//Vector3 avg_lift = Vector3.zero, avg_drag = Vector3.zero, avg_torque = Vector3.zero;
+			//float abs_lift = 0, abs_drag = 0, abs_torque = 0;
 
 			Vector3 sum_forces = Vector3.zero;
 			Airfoil[] foils = aircraft.airfoils;
@@ -192,6 +194,7 @@ namespace hexagonest.Tools
 			}
 			return EditorSceneManager.OpenScene(sim_scene_path, OpenSceneMode.Additive);
 		}
+		// close with EditorSceneManager.CloseScene(scene, true);
 
 
 		public static GameObject spawn_prefab(GameObject prefab)
@@ -201,14 +204,31 @@ namespace hexagonest.Tools
 		}
 
 
-		
 		// check if the aircraft is in the designated wind tunnel environment to avoid modifying aircraft templates
 		public static bool check_in_sim_scene(AircraftData aircraft)
 			=> aircraft.root != null && aircraft.root.scene.IsValid() && aircraft.root.scene.path == sim_scene_path;
 
 
+		public static GameObject check_in_prefab_no_dialog()
+		{
+			var stage = PrefabStageUtility.GetCurrentPrefabStage();
+			if (stage == null || !stage.prefabContentsRoot)
+			{
+				return null;
+			}
+			return stage.prefabContentsRoot;
+		}
+
+
+		public static GameObject check_if_prefab_is_aircraft()
+		{
+			GameObject prefab_root = check_in_prefab_no_dialog();
+			return prefab_root.GetComponent(game_type("Aircraft")) != null ? prefab_root : null;
+		}
+
+
 		// check if we're in a prefab, for non-invasive simulations (and cg checks)
-		public static GameObject? check_in_prefab(string tool_name)
+		public static GameObject check_in_prefab(string tool_name)
 		{
 			var stage = PrefabStageUtility.GetCurrentPrefabStage();
 			if (stage == null || !stage.prefabContentsRoot)
