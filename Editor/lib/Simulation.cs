@@ -1,0 +1,223 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+
+
+namespace hexagonest.Tools
+{
+	public static class Simulation
+	{
+		public static (float rho, float mach) isa_atm(float altitude)
+		{
+			float t, p;
+			if (altitude < 11000f)
+			{
+				t = 288.15f - altitude * 0.0065f;
+				p = 101325f * Mathf.Pow(t / 288.15f, 5.2559f);
+			} else {
+				t = 216.65f;
+				p = 22632f * Mathf.Exp(-Constants.G * (altitude - 11000f) / (287.05f * t));
+			}
+			return (p / (287.05f * t), Mathf.Sqrt(1.4f * 287.05f * t));
+		}
+
+
+		// simulation brainstorming
+		// should be able to (automatically) handle control surfaces, high lift devices (if configured for alpha - check how that works), etc
+		// should be able to accomodate different fuel loads and stores arrangements
+		//
+		// to go further, the wind tunnel will have to be able to modify an aircraft, so we're gonna want to make a wind tunnel scene
+		// that allows importing aircraft (automatically?) for the more advanced modes.
+		// this should also allow us to show visual aids, move control surfaces, etc
+		//
+		// desired result graphs:
+		// pitch/yaw moment as a function of alpha/beta angle for a given airspeed/altitude
+		// pitch input required for level flight as a function of airspeed
+
+
+		public static (float cl, float cd) foil_coefficients(ref Airfoil[] airfoils, int airfoil_id, float alpha)
+		{
+			float cl = 0, cd = 0;
+			if (airfoil_id < 0)
+			{
+				cl = 1.8f * Mathf.Sin(5f * alpha);
+				cd = 1.5f * (1f - Mathf.Cos(2f * alpha)) + 0.02f;
+			} else {
+				Airfoil foil = airfoils[airfoil_id];
+				cl = foil.lift.Evaluate(alpha);
+				cd = foil.drag.Evaluate(alpha);
+			}
+			return (cl, cd);
+		}
+
+
+		// v - airspeed (m/s)
+		// h - altitude (meters)
+		// alpha - pitch angle of attack, + nose up
+		// beta - yaw angle of attack, + nose left (!)
+		// log_spam - guess (please god do not enable this when sweeping)
+		public static (Vector3 total, Vector3 lift, Vector3 drag, Vector3 torque) aircraft_forces(AircraftData aircraft, float v, float h, float alpha, float beta, bool log_spam = false)
+		{
+			(float rho, float mach) = isa_atm(h);
+			Vector3 v_dir = new Vector3(Mathf.Sin(beta), -Mathf.Sin(alpha), Mathf.Cos(alpha));
+			Vector3 vel = v * v_dir;
+			float airspeed_sq = v * v;
+
+			AircraftPhysics physics = aircraft.physics;
+			Vector3 aircraft_cg = physics.current_cg;
+
+			// actual useful results
+			Vector3 sum_lift = Vector3.zero, sum_drag = Vector3.zero, sum_torque = Vector3.zero;
+
+			// force position * force magnitude
+			Vector3 avg_lift = Vector3.zero, avg_drag = Vector3.zero, avg_torque = Vector3.zero;
+			float abs_lift = 0, abs_drag = 0, abs_torque = 0;
+
+			Vector3 sum_forces = Vector3.zero;
+			Airfoil[] foils = aircraft.airfoils;
+			
+			foreach (Part part in aircraft.parts)
+			{
+				GameObject go = part.part_object;
+				Transform lift_transform = part.lift_transform;
+
+				// Pull a bunch of properties
+				//float wing_area = s_part.FindProperty("wingArea").floatValue;
+				//float drag_area = s_part.FindProperty("dragArea").floatValue;
+				//float airflow_channeling = s_part.FindProperty("airflowChanneling").floatValue;
+				//Vector3 center_of_lift = s_part.FindProperty("centerOfLift").vector3Value;
+				//int foil_id = s_part.FindProperty("airfoil").intValue;
+
+				PartPhysics part_phys = part.current_physics;
+
+				float wing_area = part_phys.wing_area;
+				float drag_area = part_phys.drag_area;
+				float airflow_channeling = part_phys.airflow_channeling;
+				Vector3 center_of_lift = part_phys.center_of_lift;
+				int foil_id = part_phys.foil_id;
+
+				// Implementation below derived from ILSpy decomposition of AeroJob_Math
+
+				Vector3 air_velocity = vel;
+				float wing_effectiveness = 1;
+				Vector3 force_total = Vector3.zero;
+
+				// Channeling - redirect airflow in direction of gameobject's transform.Forward()
+				if (airflow_channeling > 0f)
+				{
+					Vector3 target = part.transform.forward;//transformValues.GetReadOnlyRef(otherTransformIndex).Forward();
+					air_velocity = Vector3.RotateTowards(air_velocity, target, airflow_channeling, 0f);
+				}
+				// Alpha, coefficients
+				Vector3 local_velocity = Quaternion.Inverse(lift_transform.rotation) * air_velocity;
+				Vector3 normalized = Vector3.Cross(air_velocity, lift_transform.right).normalized;
+				float local_alpha = Mathf.Atan2(local_velocity.y, local_velocity.z);
+				(float lift_coef, float drag_coef) = foil_coefficients(ref foils, foil_id, local_alpha);
+
+				// Drag
+				float residual_drag_area = (drag_area + wing_area * 0.1f) * (1f - wing_effectiveness);
+				float parasitic_drag = 0.5f * rho * airspeed_sq * 0.5f * (drag_area + residual_drag_area);
+				float wing_drag = drag_coef * rho * airspeed_sq * 0.5f * wing_area * wing_effectiveness;
+				Vector3 force_drag = -air_velocity.normalized * (wing_drag + parasitic_drag);
+
+				// Transonic drag bump
+				float airspeed = air_velocity.magnitude;
+				if (airspeed > mach * 0.8f && airspeed < mach * 1.2f)
+				{
+					float bump_width = 0.2f;
+					float bump_gain = 0.15f;
+					float mach_offset = Mathf.Min(Mathf.Abs((mach - airspeed) / mach), bump_width);
+					float k = (bump_width - mach_offset) / bump_width;
+					force_drag *= 1f + k * k * k * bump_gain;
+				}
+
+				// Final forces
+				Vector3 force_lift = -normalized * (lift_coef * rho * airspeed_sq * 0.5f * wing_area * wing_effectiveness);
+				force_total += force_lift + force_drag;
+
+				// NaN guard
+				if (!float.IsFinite(force_total.x) || !float.IsFinite(force_total.y) || !float.IsFinite(force_total.z))
+				{
+					force_total = Vector3.zero;
+					Debug.LogWarning($"Out-of-bounds force while simulating AeroPart: {go.name}", go);
+				}
+
+				// Results
+				if (force_total != Vector3.zero)
+				{
+					if (center_of_lift != Vector3.zero)
+					{
+						Vector3 lift_arm = lift_transform.rotation * center_of_lift;
+						Vector3 torque = Vector3.Cross(force_total, -lift_arm);
+						if (log_spam) Debug.Log($"{go.name} | CoL: {center_of_lift}, arm: {lift_arm}, force: {force_total}, torque: {torque}", go);
+						sum_torque += torque;
+					}
+
+					sum_forces += force_total;
+					Vector3 part_arm = part.world_cg - aircraft_cg;
+					Vector3 this_part_torque = Vector3.Cross(part_arm, force_total);
+					if (log_spam) Debug.Log($"{go.name}: A{part_arm}, L{force_lift}, D{force_drag}, T{this_part_torque}", go);
+					sum_torque += this_part_torque;
+					sum_lift += force_lift; sum_drag += force_drag;
+				}
+			}
+			return (sum_forces, sum_lift, sum_drag, sum_torque);
+
+			// probably useless and made redundant by calculating torque directly?
+			//Vector3 center_lift = avg_lift / abs_lift, center_drag = avg_drag / abs_drag;
+			//return (center_lift, sum_lift, center_drag, sum_drag);
+		}
+	}
+
+
+	public static class SimEnvironment
+	{
+		const string sim_scene_path = "Assets/_hex/Editor/Simulator.unity";
+
+
+		public static Scene get_or_open()
+		{
+			var scene = SceneManager.GetSceneByPath(sim_scene_path);
+			if (scene.IsValid() && scene.isLoaded) return scene;
+
+			if (!System.IO.File.Exists(sim_scene_path))
+			{
+				System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(sim_scene_path));
+				var created = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Additive);
+				EditorSceneManager.SaveScene(created, sim_scene_path);
+				return created;
+			}
+			return EditorSceneManager.OpenScene(sim_scene_path, OpenSceneMode.Additive);
+		}
+
+
+		public static GameObject spawn_prefab(GameObject prefab)
+		{
+			var scene = get_or_open();
+			return (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
+		}
+
+
+		
+		// check if the aircraft is in the designated wind tunnel environment
+		// to avoid modifying aircraft templates (which shouldn't cause issues if reset but still)
+		public static bool check_in_sim_scene(AircraftData aircraft)
+			=> aircraft.root != null && aircraft.root.scene.IsValid() && aircraft.root.scene.path == sim_scene_path;
+
+
+		// check if we're in a prefab, for non-invasive simulations (and cg checks)
+		public static GameObject? check_in_prefab(string tool_name)
+		{
+			var stage = PrefabStageUtility.GetCurrentPrefabStage();
+			if (stage == null || !stage.prefabContentsRoot)
+			{
+				EditorUtility.DisplayDialog("Prefab only", $"{tool_name} can only be used in prefabs.", "OK");
+				return null;
+			}
+			return stage.prefabContentsRoot;
+		}
+	}
+}
