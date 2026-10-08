@@ -194,7 +194,7 @@ namespace hexagonest.Tools
 		public Transform transform, lift_transform;
 		public SerializedObject aero_part;
 		public PartPhysics original_physics, current_physics;
-		public Tank? fuel_tank;
+		public Tank fuel_tank;
 		public Vector3 world_cg;
 		public float mass;
 
@@ -204,17 +204,17 @@ namespace hexagonest.Tools
 			part_object = go; transform = go.transform;
 			aero_part = new SerializedObject(aero_comp);
 
-			Transform? set_lift_transform = find_prop<Transform?>(aero_part, "liftNormal");
+			Transform set_lift_transform = find_prop<Transform>(aero_part, "liftNormal");
 			lift_transform = set_lift_transform != null ? set_lift_transform : transform;
 
 			world_cg = transform.position;
-			Transform? cg_transform = find_prop<Transform?>(aero_part, "centerOfMass");
+			Transform cg_transform = find_prop<Transform>(aero_part, "centerOfMass");
 			if (cg_transform != null)
 			{
 				world_cg = ((Transform)cg_transform).position;
 			} else {
 				// TODO: Make this a utility function to find the CG of an arbitrary GameObject with a collider.
-				MeshCollider? part_col = go.GetComponent<MeshCollider>();
+				MeshCollider part_col = go.GetComponent<MeshCollider>();
 				if (part_col != null && part_col.sharedMesh != null)
 				{
 					// using a placeholder GameObject, giving it the same mesh, a collider, and a rigidbody

@@ -46,7 +46,7 @@ namespace hexagonest.Tools
 				int[] precluding_hardpoints_array = new int[precluding_hardpoints.arraySize];
 				for (int j = 0; j < precluding_hardpoints.arraySize; j++) { precluding_hardpoints_array[j] = precluding_hardpoints.GetArrayElementAtIndex(j).intValue; }
 
-				SerializedObject?[] weapon_options_array = new SerializedObject?[weapon_options.arraySize];
+				SerializedObject[] weapon_options_array = new SerializedObject[weapon_options.arraySize];
 				string[] weapon_names_array = new string[weapon_options.arraySize];
 				for (int j = 0; j < weapon_options.arraySize; j++) {
 					var option = weapon_options.GetArrayElementAtIndex(j).objectReferenceValue;
@@ -118,7 +118,7 @@ namespace hexagonest.Tools
 		public int manager_index;
 		public string name; public int[] precluding_hardpoints;
 		public bool symmetry_with_prev; public string symmetry_name;
-		public SerializedObject?[] weapon_options; public string[] option_names;
+		public SerializedObject[] weapon_options; public string[] option_names;
 		public int currently_mounted;
 		public Hardpoint[] hardpoints;
 		public Vector3 cg; public float mass;
