@@ -202,8 +202,7 @@ namespace hexagonest.Tools
 
 
 		
-		// check if the aircraft is in the designated wind tunnel environment
-		// to avoid modifying aircraft templates (which shouldn't cause issues if reset but still)
+		// check if the aircraft is in the designated wind tunnel environment to avoid modifying aircraft templates
 		public static bool check_in_sim_scene(AircraftData aircraft)
 			=> aircraft.root != null && aircraft.root.scene.IsValid() && aircraft.root.scene.path == sim_scene_path;
 

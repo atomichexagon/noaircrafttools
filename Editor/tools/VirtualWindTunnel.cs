@@ -13,7 +13,6 @@ namespace hexagonest.Tools
 {
 	public class WindTunnel : EditorWindow
 	{
-		static GameObject? current_prefab = null;
 		static AircraftData? current_aircraft = null;
 
 		enum simulation_mode {
@@ -77,21 +76,16 @@ namespace hexagonest.Tools
 
 		static void find_aircraft()
 		{
-			GameObject prefab_root = SimEnvironment.check_in_prefab("Wind tunnel"); if (prefab_root == null) return;
-			//if (prefab_root != current_prefab)
-			//{
-				//Debug.Log($"New aircraft selected: {prefab_root.name}");
-				AircraftData? aircraft = AircraftUtils.get_data_from_prefab(prefab_root);
+			GameObject prefab_root = SimEnvironment.check_in_prefab("Wind tunnel");
+			if (prefab_root == null) return;
 
-				if (prefab_root != null && aircraft != null)
-				{
-					current_prefab = prefab_root;
-					current_aircraft = aircraft;
+			AircraftData? aircraft = AircraftUtils.get_data_from_prefab(prefab_root);
 
-					// TODO: By default, pull the fuel fraction from the aircraft, not set it to whatever.
-					((AircraftData)aircraft).set_fuel_fraction(fuel_level / 100f);
-				}
-			//}
+			if (prefab_root != null && aircraft != null)
+			{
+				current_aircraft = aircraft;
+				fuel_level = aircraft.fuel_fraction;
+			}
 		}
 
 		[MenuItem("HexTools/Wind tunnel")]
@@ -99,7 +93,7 @@ namespace hexagonest.Tools
 		{
 			find_aircraft();
 
-			if (current_prefab != null && current_aircraft != null)
+			if (current_aircraft != null)
 			{
 				var window = GetWindow<WindTunnel>("Wind Tunnel");
 				window.minSize = new Vector2(600f, 400f);
@@ -160,7 +154,7 @@ namespace hexagonest.Tools
 		private void OnGUI()
 		{
 			aircraft_def = EditorGUILayout.ObjectField("Aircraft template", aircraft_def, game_type("AircraftDefinition"), false);
-			if (current_prefab == null || current_aircraft == null) {
+			if (current_aircraft == null) {
 				EditorGUILayout.HelpBox("No aircraft loaded", MessageType.Info);
 
 				if (GUILayout.Button("Check again", GUILayout.Height(28)))
@@ -273,7 +267,7 @@ namespace hexagonest.Tools
 		private void run_simulation()
 		{
 			find_aircraft();
-			if (current_aircraft == null || current_prefab == null) { Debug.LogError("No aircraft selected, or no prefab available"); return; }
+			if (current_aircraft == null) { Debug.LogError("No aircraft selected, or no prefab available"); return; }
 
 			List<(string name, List<Vector2> points, Color color)> new_series = new List<(string name, List<Vector2> points, Color color)>();
 
