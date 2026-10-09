@@ -64,7 +64,7 @@ namespace hexagonest.Tools
 		public static (Vector3 total, Vector3 lift, Vector3 drag, Vector3 torque) aircraft_forces(AircraftData aircraft, float v, float h, float alpha, float beta, bool log_spam = false)
 		{
 			(float rho, float mach) = isa_atm(h);
-			Vector3 v_dir = new Vector3(Mathf.Sin(-beta), -Mathf.Sin(alpha), Mathf.Cos(alpha));
+			Vector3 v_dir = new Vector3(Mathf.Sin(beta), -Mathf.Sin(alpha), Mathf.Cos(alpha)).normalized;
 			Vector3 vel = v * v_dir;
 			float airspeed_sq = v * v;
 
@@ -166,6 +166,20 @@ namespace hexagonest.Tools
 					sum_lift += force_lift; sum_drag += force_drag;
 				}
 			}
+
+			// handle control surface split drag
+			foreach (ControlSurface surface in aircraft.control_surfaces)
+			{
+				if (surface.split_amount == 0) continue;
+				Vector3 force_drag = v_dir * (-1f * surface.split_amount * surface.split_drag * rho * airspeed_sq);
+
+				sum_forces += force_drag;
+				Vector3 part_arm = surface.attached_part.world_cg - aircraft_cg;
+				Vector3 this_part_torque = Vector3.Cross(part_arm, force_drag);
+				sum_torque += this_part_torque;
+				sum_drag += force_drag;
+			}
+
 			return (sum_forces, sum_lift, sum_drag, sum_torque);
 
 			// probably useless and made redundant by calculating torque directly?
@@ -174,10 +188,19 @@ namespace hexagonest.Tools
 		}
 	}
 
+//	// component to be added to the aircraft container
+//	public class SimulationRootComponent : MonoBehavior
+//	{
+//		
+//	}
 
 	public static class SimEnvironment
 	{
 		const string sim_scene_path = "Assets/_hex/Editor/Simulator.unity";
+		const string container_name = "aircraft_root";
+		const string container_scene_path = "/aircraft_root";
+
+		public static bool is_in_sim_scene = false; // safety check for functionality that will modify the aircraft
 
 
 		public static Scene get_or_open()
@@ -188,13 +211,37 @@ namespace hexagonest.Tools
 			if (!System.IO.File.Exists(sim_scene_path))
 			{
 				System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(sim_scene_path));
-				var created = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Additive);
+				var created = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
 				EditorSceneManager.SaveScene(created, sim_scene_path);
 				return created;
 			}
-			return EditorSceneManager.OpenScene(sim_scene_path, OpenSceneMode.Additive);
+			return EditorSceneManager.OpenScene(sim_scene_path, OpenSceneMode.Single);
 		}
 		// close with EditorSceneManager.CloseScene(scene, true);
+
+
+		// loads scene, removes existing aircraft (!) (if present), instantiates new one
+		public static (GameObject container, GameObject aircraft, string status) setup_wind_tunnel(GameObject aircraft_prefab, bool remove_existing)
+		{
+			Scene wind_tunnel_scene = get_or_open();
+			GameObject container = GameObject.Find(container_scene_path);
+
+			if (container != null) // already existed, so we should check for an existing aircraft here
+			{
+				GameObject existing_aircraft = get_aircraft_in_tunnel();
+				if (existing_aircraft != null)
+				{
+					if (remove_existing) UnityEngine.Object.DestroyImmediate(existing_aircraft);
+					else return (null, null, "Aircraft already in wind tunnel scene");
+				}
+			}
+			else container = new GameObject(container_name);
+
+			GameObject new_aircraft = (GameObject)PrefabUtility.InstantiatePrefab(aircraft_prefab, wind_tunnel_scene);
+			new_aircraft.transform.SetParent(container.transform);
+
+			return (container, new_aircraft, "Loaded successfully");
+		}
 
 
 		public static GameObject spawn_prefab(GameObject prefab)
@@ -204,9 +251,26 @@ namespace hexagonest.Tools
 		}
 
 
+		// tries to find an aircraft if we're currently in the wind tunnel
+		public static GameObject get_aircraft_in_tunnel()
+		{
+			if (EditorSceneManager.GetActiveScene().path != sim_scene_path) return null;
+			
+			var container = GameObject.Find(container_scene_path);
+			if (container == null) return null;
+
+			var aircraft = container.GetComponentInChildren(game_type("Aircraft"));
+			return aircraft != null ? aircraft.gameObject : null;
+		}
+
+
 		// check if the aircraft is in the designated wind tunnel environment to avoid modifying aircraft templates
-		public static bool check_in_sim_scene(AircraftData aircraft)
-			=> aircraft.root != null && aircraft.root.scene.IsValid() && aircraft.root.scene.path == sim_scene_path;
+		public static bool check_obj_in_sim(GameObject obj_to_check)
+			=> obj_to_check != null && obj_to_check.scene.IsValid() && obj_to_check.scene.path == sim_scene_path;
+
+
+		// check if the aircraft is in the designated wind tunnel environment to avoid modifying aircraft templates
+		public static bool check_in_sim_scene(AircraftData aircraft) => check_obj_in_sim(aircraft.root);
 
 
 		public static GameObject check_in_prefab_no_dialog()
@@ -223,7 +287,8 @@ namespace hexagonest.Tools
 		public static GameObject check_if_prefab_is_aircraft()
 		{
 			GameObject prefab_root = check_in_prefab_no_dialog();
-			return prefab_root.GetComponent(game_type("Aircraft")) != null ? prefab_root : null;
+			if (prefab_root != null) return prefab_root.GetComponent(game_type("Aircraft")) != null ? prefab_root : null;
+			return null;
 		}
 
 

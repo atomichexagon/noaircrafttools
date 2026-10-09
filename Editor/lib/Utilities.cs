@@ -283,14 +283,14 @@ namespace hexagonest.Tools
 
 	[Serializable] public class ValueWithUnit
 	{
-		public string field_name; public string unit_type; public string reference_unit;
-		public string[] unit_options; public string[] original_unit_options; public int current_unit_index; public string current_unit;
-		public float current_value; public float converted_value;
-		public float current_conversion;
+		public string field_name, unit_type, reference_unit, current_unit;
+		public string[] unit_options, original_unit_options; public int current_unit_index;
+		public float current_value, converted_value, current_conversion;
 
 		public ValueWithUnit(string set_field_name, string set_unit_type, float set_initial_value, string set_reference_unit, string set_current_unit)
 		{
-			field_name = set_field_name; unit_type = set_unit_type; reference_unit = set_reference_unit; current_unit = set_current_unit;
+			field_name = set_field_name; unit_type = set_unit_type;
+			reference_unit = set_reference_unit; current_unit = set_current_unit;
 			original_unit_options = Units.key_names[unit_type];
 			// replace slashes with a similar looking character so the unit selection popup doesn't spawn submenus for no reason
 			unit_options = original_unit_options.Select(option => option.Replace('/', '\u2044')).ToArray();
@@ -370,11 +370,70 @@ namespace hexagonest.Tools
 		}
 	}
 
+
+	[Serializable] public class ControlInputsPanel
+	{
+		public float pitch, roll, yaw, throttle, brake, custom_axis1;
+		public bool gear;
+		public ControlInputs inputs_obj
+		{
+			get => new ControlInputs {
+				pitch = pitch, roll = roll, yaw = yaw, throttle = throttle, brake = brake, custom_axis1 = custom_axis1, gear = gear
+			};
+		}
+
+		public ControlInputsPanel(
+			float _pitch = 0, float _roll = 0, float _yaw = 0, float _throttle = 0,
+			float _brake = 0, float _custom_axis1 = 0, bool _gear = false
+		)
+		{
+			pitch = _pitch; roll = _roll; yaw = _yaw; throttle = _throttle; brake = _brake; custom_axis1 = _custom_axis1; gear = _gear;
+		}
+
+		public bool present(bool safe_to_edit = true)
+		{
+			EditorGUILayout.BeginHorizontal();
+			GUILayout.Label($"Aircraft controls{(!safe_to_edit ? " (unavailable outside of wind tunnel)" : "")}");
+			GUILayout.FlexibleSpace();
+
+			EditorGUI.BeginChangeCheck();
+			if (GUILayout.Button("Reset")) { pitch = 0; roll = 0; yaw = 0; throttle = 0; brake = 0; custom_axis1 = 0; }
+			EditorGUILayout.EndHorizontal();
+
+			pitch = EditorGUILayout.Slider("Pitch (+ down)", pitch, -1, 1);
+			roll = EditorGUILayout.Slider("Roll (+ right)", roll, -1, 1);
+			yaw = EditorGUILayout.Slider("Yaw (+ right)", yaw, -1, 1);
+			throttle = EditorGUILayout.Slider("Throttle", throttle, 0, 1);
+			brake = EditorGUILayout.Slider("Brake", brake, 0, 1);
+			custom_axis1 = EditorGUILayout.Slider("CustomAxis1", custom_axis1, 0, 1);
+			gear = EditorGUILayout.Toggle("Gear", gear);
+			return EditorGUI.EndChangeCheck();
+		}
+	}
+
 	public static class AircraftUtils
 	{
 		public static AircraftData get_data_from_prefab(GameObject prefab_root)
 		{
 			return new AircraftData(prefab_root);
+		}
+
+
+		public static UnityEngine.Object get_definition_from_root(GameObject aircraft_root)
+		{
+			var aircraft_comp = aircraft_root.GetComponent(game_type("Aircraft"));
+			if (aircraft_comp == null) return null;
+
+			return find_prop<UnityEngine.Object>(new SerializedObject(aircraft_comp), "definition");
+		}
+
+
+		public static GameObject get_prefab_from_root(GameObject aircraft_root)
+		{
+			var def_obj = get_definition_from_root(aircraft_root);
+			if (def_obj == null) return null;
+
+			return find_prop<GameObject>(new SerializedObject(def_obj), "unitPrefab");
 		}
 	}
 

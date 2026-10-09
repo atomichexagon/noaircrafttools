@@ -10,7 +10,10 @@ using static hexagonest.Tools.Utilities;
 namespace hexagonest.Tools
 {
 	// input simulator
-	[Serializable] public struct ControlInputs { public float pitch, roll, yaw, throttle, brake, custom_axis1; }
+	[Serializable] public struct ControlInputs {
+		public float pitch, roll, yaw, throttle, brake, custom_axis1;
+		public bool gear; // blow my head off
+	}
 
 
 
@@ -20,11 +23,13 @@ namespace hexagonest.Tools
 		public SerializedObject aircraft, def, param;
 		public AircraftPhysics physics;
 		public Part[] parts;
+		public Dictionary<Component, Part> part_lookup;
+		public ControlSurface[] control_surfaces;
 		public Tank[] tanks;
 		public float fuel_fraction;
 		public Airfoil[] airfoils;
 		public HardpointManager hardpoint_manager;
-		public bool has_hardpoints = false;
+		public ControlInputs last_controls_state;
 
 		public AircraftData(GameObject aircraft_root) {
 			root = aircraft_root;
@@ -33,20 +38,28 @@ namespace hexagonest.Tools
 			param = new SerializedObject(find_prop<UnityEngine.Object>(def, "aircraftParameters"));
 			physics = new AircraftPhysics(this);
 
+			part_lookup = new Dictionary<Component, Part>();
 			List<Part> aircraft_parts = new List<Part>();
 			List<Tank> aircraft_tanks = new List<Tank>();
+			List<ControlSurface> aircraft_surfaces = new List<ControlSurface>();
 
 			foreach (Component aero_part in root.GetComponentsInChildren(game_type("AeroPart"), true))
 			{
 				GameObject go = aero_part.gameObject;
 
 				Part new_part = new Part(this, go, aero_part);
+				part_lookup[aero_part] = new_part;
+
 				aircraft_parts.Add(new_part);
 				if (new_part.fuel_tank != null)
 				{
 					aircraft_tanks.Add((Tank)new_part.fuel_tank);
 				}
 			}
+
+			control_surfaces = root.GetComponentsInChildren(game_type("ControlSurface"), true)
+				.Select(comp => new ControlSurface(this, comp))
+				.ToArray();
 
 			parts = aircraft_parts.ToArray();
 			tanks = aircraft_tanks.ToArray();
@@ -75,12 +88,17 @@ namespace hexagonest.Tools
 
 		public void set_fuel_fraction(float new_fuel_fraction)
 		{
-			foreach (Tank tank in tanks)
-			{
-				tank.set_fuel_fraction(new_fuel_fraction);
-			}
+			Array.ForEach(tanks, tank => tank.set_fuel_fraction(new_fuel_fraction));
 			fuel_fraction = new_fuel_fraction;
 			physics.quick_recalculate();
+		}
+
+		public bool set_controls(ControlInputs new_controls, float dt = 100f)
+		{
+			bool surfaces_moved = false;
+			Array.ForEach(control_surfaces, surface => surfaces_moved = surface.actuate(new_controls, dt) ? true : surfaces_moved);
+			last_controls_state = new_controls;
+			return surfaces_moved;
 		}
 	}
 
@@ -175,14 +193,94 @@ namespace hexagonest.Tools
 
 	[Serializable] public class ControlSurface
 	{
-		public AircraftData parent_aircraft;
+		public AircraftData parent_aircraft; // only really needed to look for attached_part
 		public GameObject surface_object;
 		public Part attached_part; // Attached Surface
-		public GameObject surface_hinge; // Visible Mesh
-		public float pitch_response, yaw_response, roll_response, brake_response, servo_speed, split_drag;
+		public GameObject visible_mesh;
+		public Transform split_upper, split_lower;
+		public float pitch_response, roll_response, yaw_response, brake_response, servo_speed;
+		public float split_drag, max_split, yaw_split;
+
 		public bool is_flap, locked; // locked is for potential future WingSweepController integration
+		public float current_pitch, current_roll, current_yaw, split_amount, last_angle, last_split;
 
+		public Quaternion resting_rotation, resting_split_rotation;
 
+		public ControlSurface(AircraftData parent, Component surface_comp)
+		{
+			parent_aircraft = parent;
+			surface_object = surface_comp.gameObject;
+			var s_surface = new SerializedObject(surface_comp);
+
+			attached_part = parent_aircraft.part_lookup[find_prop<Component>(s_surface, "attachedSurface")];
+			visible_mesh = find_prop<GameObject>(s_surface, "visibleMesh");
+			resting_rotation = visible_mesh.transform.localRotation;
+
+			pitch_response = find_prop<float>(s_surface, "pitchRange");
+			roll_response = find_prop<float>(s_surface, "rollRange");
+			yaw_response = find_prop<float>(s_surface, "yawRange");
+			brake_response = find_prop<float>(s_surface, "brakeRange");
+			is_flap = find_prop<bool>(s_surface, "flap");
+			servo_speed = find_prop<float>(s_surface, "servoSpeed");
+			split_drag = find_prop<float>(s_surface, "splitDrag");
+			max_split = find_prop<float>(s_surface, "maxSplit");
+			yaw_split = find_prop<float>(s_surface, "yawSplitFactor");
+
+			if (max_split > 0)
+			{
+				split_upper = find_prop<Transform>(s_surface, "splitUpper");
+				split_lower = find_prop<Transform>(s_surface, "splitLower");
+
+				resting_split_rotation = split_upper.transform.localRotation;
+			}
+		}
+
+		// dt is here for futureproofing i guess, in the horrible event that we end up doing dynamic sims
+		public bool actuate(ControlInputs inputs, float dt = 100f)
+		{
+			float servo_delta = servo_speed * dt;
+			if (!is_flap)
+			{
+				float pitch_delta = inputs.pitch * pitch_response - current_pitch;
+				current_pitch += Mathf.Clamp(pitch_delta, -servo_delta, servo_delta);
+				current_pitch = Mathf.Clamp(current_pitch, -Mathf.Abs(pitch_response), Mathf.Abs(pitch_response));
+
+				float roll_delta = inputs.roll * roll_response - current_roll;
+				current_roll += Mathf.Clamp(roll_delta, -servo_delta, servo_delta);
+				current_roll = Mathf.Clamp(current_roll, -Mathf.Abs(roll_response), Mathf.Abs(roll_response));
+
+				float yaw_delta = inputs.yaw * yaw_response - current_yaw;
+				current_yaw += Mathf.Clamp(yaw_delta, -servo_delta, servo_delta);
+				current_yaw = Mathf.Clamp(current_yaw, -Mathf.Abs(yaw_response), Mathf.Abs(yaw_response));
+			} else { // this behavior is really weird, but it's how the game does it, so..
+				if (inputs.gear)
+				{
+					current_pitch -= servo_delta;
+				} else {
+					current_pitch += servo_delta;
+				}
+				current_pitch = Mathf.Clamp(current_pitch, -pitch_response, 0f);
+			}
+			float main_angle = current_pitch + current_roll + current_yaw;
+			bool safe_to_edit = SimEnvironment.check_in_sim_scene(parent_aircraft);
+			if (safe_to_edit) visible_mesh.transform.localRotation = resting_rotation * Quaternion.AngleAxis(main_angle, Vector3.right);
+
+			if (max_split > 0f)
+			{
+				float split_target = inputs.throttle == 0f ? max_split : 0f;
+				split_target = Mathf.Clamp(split_target + yaw_split * inputs.yaw * max_split, 0f, max_split);
+				split_amount += Mathf.Clamp(split_target - split_amount, -servo_delta, servo_delta);
+				if (safe_to_edit)
+				{
+					split_upper.transform.localRotation = resting_split_rotation * Quaternion.AngleAxis(split_amount, Vector3.right);
+					split_lower.transform.localRotation = resting_split_rotation * Quaternion.AngleAxis(-split_amount, Vector3.right);
+				}
+			}
+
+			bool changed = (last_angle != main_angle) || (last_split != split_amount);
+			last_angle = main_angle; last_split = split_amount;
+			return changed;
+		}
 	}
 
 
