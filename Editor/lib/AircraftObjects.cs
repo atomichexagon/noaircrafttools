@@ -10,9 +10,10 @@ using static hexagonest.Tools.Utilities;
 namespace hexagonest.Tools
 {
 	// input simulator
-	[Serializable] public struct ControlInputs {
-		public float pitch, roll, yaw, throttle, brake, custom_axis1;
-		public bool gear; // blow my head off
+	[Serializable] public class ControlInputs {
+		public float pitch = 0, roll = 0, yaw = 0, throttle = 0, brake = 0, custom_axis1 = 0;
+		public bool gear = false; // blow my head off
+		// TODO: simulate gear drag?
 	}
 
 
@@ -103,7 +104,7 @@ namespace hexagonest.Tools
 	}
 
 
-	[Serializable] public struct Airfoil
+	[Serializable] public class Airfoil
 	{
 		public string name; public AnimationCurve lift, drag;
 	}
@@ -116,6 +117,7 @@ namespace hexagonest.Tools
 		public AircraftData parent_aircraft;
 		public Vector3 dry_cg, fuel_cg, max_fuel_cg, stores_cg, current_cg;
 		public float dry_mass, fuel_mass, max_fuel_mass, stores_mass, current_mass;
+		public float wing_area, drag_area;
 
 		public AircraftPhysics(AircraftData set_parent_aircraft) => parent_aircraft = set_parent_aircraft;
 
@@ -123,10 +125,15 @@ namespace hexagonest.Tools
 		{
 			cg_finder dry = new cg_finder(), fuel = new cg_finder(), max_fuel = new cg_finder(), current = new cg_finder();
 
+			float new_wing_area = 0, new_drag_area = 0;
+
 			foreach (Part part in parent_aircraft.parts)
 			{
 				PartPhysics part_phys = part.current_physics;
 				Vector3 part_cg = part_phys.cg;
+
+				new_wing_area += part_phys.wing_area;
+				new_drag_area += part_phys.drag_area;
 
 				dry.add(part_cg, part_phys.dry_mass + part_phys.extra_mass);
 				fuel.add(part_cg, part_phys.fuel_mass);
@@ -143,6 +150,9 @@ namespace hexagonest.Tools
 			(max_fuel_cg, max_fuel_mass) = max_fuel.average();
 			current.add(stores_cg, stores_mass);
 			(current_cg, current_mass) = current.average();
+
+			wing_area = new_wing_area;
+			drag_area = new_drag_area;
 
 			parent_aircraft.fuel_fraction = fuel_mass / max_fuel_mass;
 		}
@@ -233,6 +243,7 @@ namespace hexagonest.Tools
 
 				resting_split_rotation = split_upper.transform.localRotation;
 			}
+			attached_part.control_surface = this;
 		}
 
 		// dt is here for futureproofing i guess, in the horrible event that we end up doing dynamic sims
@@ -263,7 +274,7 @@ namespace hexagonest.Tools
 			}
 			float main_angle = current_pitch + current_roll + current_yaw;
 			bool safe_to_edit = SimEnvironment.check_in_sim_scene(parent_aircraft);
-			if (safe_to_edit) visible_mesh.transform.localRotation = resting_rotation * Quaternion.AngleAxis(main_angle, Vector3.right);
+			if (safe_to_edit && main_angle != last_angle) visible_mesh.transform.localRotation = resting_rotation * Quaternion.AngleAxis(main_angle, Vector3.right);
 
 			if (max_split > 0f)
 			{
@@ -292,6 +303,7 @@ namespace hexagonest.Tools
 		public Transform transform, lift_transform;
 		public SerializedObject aero_part;
 		public PartPhysics original_physics, current_physics;
+		public ControlSurface control_surface;
 		public Tank fuel_tank;
 		public Vector3 world_cg;
 		public float mass;
@@ -328,9 +340,13 @@ namespace hexagonest.Tools
 					UnityEngine.Object.DestroyImmediate(probe);
 				}
 			}
-
 			mass = find_prop<float>(aero_part, "mass");
 			float dry_mass = mass, fuel_mass = 0;
+			
+			// must be passed in externally, because i don't know if all control surfaces are part of the same
+			// gameobject as the aeropart (which is also the case with the fuel tank, but... it is what it is)
+			// this can probably be changed later once the rules around that are discovered
+			control_surface = null;
 
 			Component part_tank = go.GetComponent(game_type("FuelTank"));
 			if (part_tank != null)

@@ -126,7 +126,7 @@ namespace hexagonest.Tools
 		public void set_mounted_option(int option)
 		{
 			currently_mounted = option;
-			// TODO: this
+			// TODO: set up hardpoint mounting when in wind tunnel scene
 		}
 	}
 

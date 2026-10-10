@@ -56,12 +56,31 @@ namespace hexagonest.Tools
 		}
 
 
+		// could be used to make a force visualizer, both vectors should be in world coordinates
+		public struct ForcePos { public Vector3 force, pos; public ForcePos(Vector3 _force, Vector3 _pos) { force = _force; pos = _pos; } }
+
+		// collects output forces in one place
+		public class SimForces {
+			public List<ForcePos> total = new List<ForcePos>(), lift = new List<ForcePos>(),
+				drag = new List<ForcePos>(), torque = new List<ForcePos>();
+			
+			public void add(Vector3 pos, Vector3 _total, Vector3 _lift, Vector3 _drag, Vector3 _torque)
+			{
+				total.Add(new ForcePos(_total, pos));
+				lift.Add(new ForcePos(_lift, pos));
+				drag.Add(new ForcePos(_drag, pos));
+				torque.Add(new ForcePos(_torque, pos));
+			}
+		}
+		public struct SimResults { public Vector3 total, lift, drag, torque; public SimForces forces; }
+
+
 		// v - airspeed (m/s)
 		// h - altitude (meters)
 		// alpha - pitch angle of attack, + nose up
 		// beta - yaw angle of attack, + nose left (!)
 		// log_spam - guess (please god do not enable this when sweeping)
-		public static (Vector3 total, Vector3 lift, Vector3 drag, Vector3 torque) aircraft_forces(AircraftData aircraft, float v, float h, float alpha, float beta, bool log_spam = false)
+		public static SimResults aircraft_forces(AircraftData aircraft, float v, float h, float alpha, float beta, bool log_spam = false)
 		{
 			(float rho, float mach) = isa_atm(h);
 			Vector3 v_dir = new Vector3(Mathf.Sin(beta), -Mathf.Sin(alpha), Mathf.Cos(alpha)).normalized;
@@ -72,14 +91,10 @@ namespace hexagonest.Tools
 			Vector3 aircraft_cg = physics.current_cg;
 
 			// actual useful results
-			Vector3 sum_lift = Vector3.zero, sum_drag = Vector3.zero, sum_torque = Vector3.zero;
-
-			// force position * force magnitude
-			//Vector3 avg_lift = Vector3.zero, avg_drag = Vector3.zero, avg_torque = Vector3.zero;
-			//float abs_lift = 0, abs_drag = 0, abs_torque = 0;
-
-			Vector3 sum_forces = Vector3.zero;
+			Vector3 sum_total = Vector3.zero, sum_lift = Vector3.zero, sum_drag = Vector3.zero, sum_torque = Vector3.zero;
 			Airfoil[] foils = aircraft.airfoils;
+
+			SimForces forces = new SimForces();
 			
 			foreach (Part part in aircraft.parts)
 			{
@@ -136,6 +151,18 @@ namespace hexagonest.Tools
 					force_drag *= 1f + k * k * k * bump_gain;
 				}
 
+				// Handle control surfaces
+				// Technically shouldn't be here, this is handled outside of AeroPart simulation, but it's probably fine
+				if (part.control_surface != null)
+				{
+					ControlSurface surface = part.control_surface;
+					if (surface.split_amount != 0)
+					{
+						Vector3 surface_drag = v_dir * (-1f * surface.split_amount * surface.split_drag * rho * airspeed_sq);
+						force_drag += surface_drag;
+					}
+				}
+
 				// Final forces
 				Vector3 force_lift = -normalized * (lift_coef * rho * airspeed_sq * 0.5f * wing_area * wing_effectiveness);
 				force_total += force_lift + force_drag;
@@ -150,41 +177,39 @@ namespace hexagonest.Tools
 				// Results
 				if (force_total != Vector3.zero)
 				{
+					Vector3 part_torque = Vector3.zero;
 					if (center_of_lift != Vector3.zero)
 					{
 						Vector3 lift_arm = lift_transform.rotation * center_of_lift;
-						Vector3 torque = Vector3.Cross(force_total, -lift_arm);
-						if (log_spam) Debug.Log($"{go.name} | CoL: {center_of_lift}, arm: {lift_arm}, force: {force_total}, torque: {torque}", go);
-						sum_torque += torque;
+						part_torque += Vector3.Cross(force_total, -lift_arm);
+						if (log_spam) Debug.Log($"{go.name} | CoL: {center_of_lift}, arm: {lift_arm}, force: {force_total}, torque: {part_torque}", go);
 					}
 
-					sum_forces += force_total;
-					Vector3 part_arm = part.world_cg - aircraft_cg;
-					Vector3 this_part_torque = Vector3.Cross(part_arm, force_total);
-					if (log_spam) Debug.Log($"{go.name}: A{part_arm}, L{force_lift}, D{force_drag}, T{this_part_torque}", go);
-					sum_torque += this_part_torque;
-					sum_lift += force_lift; sum_drag += force_drag;
+					Vector3 part_cg = part.world_cg;
+					Vector3 part_arm = part_cg - aircraft_cg;
+					part_torque += Vector3.Cross(part_arm, force_total);
+					if (log_spam) Debug.Log($"{go.name}: A{part_arm}, L{force_lift}, D{force_drag}, T{part_torque}", go);
+
+					sum_total += force_total; sum_lift += force_lift; sum_drag += force_drag; sum_torque += part_torque;
+
+					// maybe torque should only include torque acting on the actual part, like from center_of_lift being nonzero?
+					forces.add(part_cg, force_total, force_lift, force_drag, part_torque);
 				}
 			}
 
 			// handle control surface split drag
-			foreach (ControlSurface surface in aircraft.control_surfaces)
-			{
-				if (surface.split_amount == 0) continue;
-				Vector3 force_drag = v_dir * (-1f * surface.split_amount * surface.split_drag * rho * airspeed_sq);
+			// foreach (ControlSurface surface in aircraft.control_surfaces)
+			// {
+			// 	if (surface.split_amount == 0) continue;
+			// 	Vector3 force_drag = v_dir * (-1f * surface.split_amount * surface.split_drag * rho * airspeed_sq);
 
-				sum_forces += force_drag;
-				Vector3 part_arm = surface.attached_part.world_cg - aircraft_cg;
-				Vector3 this_part_torque = Vector3.Cross(part_arm, force_drag);
-				sum_torque += this_part_torque;
-				sum_drag += force_drag;
-			}
+			// 	sum_total += force_drag; sum_drag += force_drag;
+			// 	Vector3 part_arm = surface.attached_part.world_cg - aircraft_cg;
+			// 	Vector3 this_part_torque = Vector3.Cross(part_arm, force_drag);
+			// 	sum_torque += this_part_torque;
+			// }
 
-			return (sum_forces, sum_lift, sum_drag, sum_torque);
-
-			// probably useless and made redundant by calculating torque directly?
-			//Vector3 center_lift = avg_lift / abs_lift, center_drag = avg_drag / abs_drag;
-			//return (center_lift, sum_lift, center_drag, sum_drag);
+			return new SimResults { total = sum_total, lift = sum_lift, drag = sum_drag, torque = sum_torque, forces = forces };
 		}
 	}
 

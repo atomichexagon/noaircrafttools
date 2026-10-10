@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using System;
+using System.Linq;
 using System.Reflection;
 using System.Collections.Generic;
 using UnityEngine;
@@ -22,6 +23,9 @@ namespace hexagonest.Tools
 		private WindTunnel_Target() {}
 	}
 
+
+
+	// Author's note: I'm sorry in advance if you're good with C#. I imagine reading this will be a form of torture.
 	public class WindTunnel : EditorWindow
 	{
 		static UnityEngine.Object aircraft_definition = null;
@@ -33,23 +37,74 @@ namespace hexagonest.Tools
 
 		static bool in_wind_tunnel = false; // some features disabled in prefabs to avoid potentially messing with them
 
-		enum simulation_mode {
-			angle_sweep, // choose between alpha or beta
-			mach_sweep, // unimplemented
-			static_stability, // find aircraft's aerodynamic neutral point/static margin
+		// TODO: investigate possibility of refactoring things to move mode-specific functionality into WindTunnelMode
+		// using before_sim_step and sim_step to allow for more complex simulations without bloating run_simulation()
+		// maybe overkill, but it'd also allow others (that's you) to more easily expand functionality to fit their use cases
+		// and the goal is for this tool to be useful so.. may as well
+
+		//[Serializable]
+		//public struct sim_parameters { float speed, altitude, alpha, beta };
+
+		public class WindTunnelMode
+		{
+			public string sim_type, name, description;
+			public bool controls_enabled; // aircraft controls
+			public Dictionary<string, bool> parameters_shown;
+		
+			// the idea is that WindTunnel calls this before a step, and it outputs the parameters to feed into aircraft_forces()
+			//public delegate sim_parameters before_sim_step();
+
+			// and then this could define behavior that isn't just a one-shot calculation of that specific case, e.g. calculating trim
+			//public delegate void sim_step();
+		
+			public WindTunnelMode(string _sim_type, string _name, string _description, bool _controls_enabled, string[] _parameters_shown)
+			{
+				sim_type = _sim_type; name = _name; description = _description; controls_enabled = _controls_enabled;
+				parameters_shown = _parameters_shown.ToDictionary(param => param, param => true);
+			}
+		}
+
+		// TODO: show descriptions somewhere
+		static WindTunnelMode[] modes_available = new WindTunnelMode[] {
+			new WindTunnelMode ("alpha_sweep", "Alpha sweep",
+				"Sweeps alpha angles, fixed airspeed/altitude/beta. Calculates forces, L/D ratio, and aerodynamic moments.",
+				true, new string[] { "airspeed_fixed", "altitude_fixed", "alpha_range", "beta_fixed" }
+			),
+			new WindTunnelMode ("beta_sweep", "Beta sweep",
+				"Sweeps beta angles, fixed airspeed/altitude/alpha. Calculates forces, L/D ratio, and aerodynamic moments.",
+				true, new string[] { "airspeed_fixed", "altitude_fixed", "beta_range", "alpha_fixed" }
+			),
+			new WindTunnelMode ("trim_sweep", "Trim sweep",
+				"Sweeps alpha angles and finds zero-moment elevator input, fixed airspeed/altitude/beta. Calculates forces, L/D ratio, and aerodynamic moments.",
+				true, new string[] { "airspeed_fixed", "altitude_fixed", "alpha_range", "beta_fixed" }
+			),
 		};
 
-		static readonly string[] mode_names = {
-			"Angle sweep",
-			"Mach sweep",
-			"Static stability"
-		};
+		// TODO: remove once WindTunnelModes are working
+		//enum simulation_mode {
+		//	angle_sweep, // fixed V/alpha/beta (mode dependent), sweep alpha/beta, calculate forces/l-d ratio/aero torques
+		//	trim_sweep, // fixed V/beta, sweep alpha, find zero-pitch elevator input, calculate forces/l-d ratio/aero torques
+		//	deflection_sweep, // fixed V/alpha/beta, sweep an input (pitch/yaw/roll) and calculate forces/l-d ratio/aero torques
+		//	//mach_sweep, // TBD - fixed alpha, sweep mach, calculate forces/l-d ratio/aero torques - maybe calculate acceleration?
+		//	//static_stability, // find aircraft's aerodynamic neutral point/static margin
+		//};
 
-		static simulation_mode current_mode = simulation_mode.angle_sweep;
+		//static readonly ()[] mode_data = {
+		//	"Angle sweep",
+		//	"Trim sweep",
+		//	"Deflection sweep"
+		//	//"Mach sweep",
+		//	//"Static stability"
+		//};
 
-		enum angle_mode { alpha, beta };
-		static readonly string[] angle_mode_names = { "Alpha", "Beta" };
-		static angle_mode angle_sweep_mode = angle_mode.alpha;
+		static string[] mode_names = modes_available.Select(mode => mode.name).ToArray();
+		static WindTunnelMode current_mode = modes_available[0]; //simulation_mode.angle_sweep;
+		static int current_mode_index = 0;
+
+		// TODO: remove once WindTunnelModes are working
+		//enum angle_mode { alpha, beta };
+		//static readonly string[] angle_mode_names = { "Alpha", "Beta" };
+		//static angle_mode angle_sweep_mode = angle_mode.alpha;
 
 		// rerun simulation when parameters are changed
 		static bool simulate_on_change = true;
@@ -67,16 +122,16 @@ namespace hexagonest.Tools
 		static bool using_airspeed = true; // true if airspeed (m/s or converted) was last changed, false if mach was last changed
 
 		// simulation parameters
-		static ValueWithUnit airspeed_min = new ValueWithUnit("Airspeed", "speed", 100f, "m/s", "km/h");
-		static ValueWithUnit airspeed_max = new ValueWithUnit("Airspeed", "speed", 200f, "m/s", "km/h");
+		static ValueWithUnit airspeed_min = new ValueWithUnit("Airspeed (min)", "speed", 100f, "m/s", "km/h");
+		static ValueWithUnit airspeed_max = new ValueWithUnit("Airspeed (max)", "speed", 200f, "m/s", "km/h");
 		static ValueWithUnit airspeed_fixed = new ValueWithUnit("Airspeed", "speed", 100f, "m/s", "km/h");
 		
-		static ValueWithUnit altitude_min = new ValueWithUnit("Altitude", "distance", 0f, "m", "ft");
-		static ValueWithUnit altitude_max = new ValueWithUnit("Altitude", "distance", 2500f, "m", "ft");
+		static ValueWithUnit altitude_min = new ValueWithUnit("Altitude (min)", "distance", 0f, "m", "ft");
+		static ValueWithUnit altitude_max = new ValueWithUnit("Altitude (max)", "distance", 2500f, "m", "ft");
 		static ValueWithUnit altitude_fixed = new ValueWithUnit("Altitude", "distance", 50f, "m", "ft");
 
-		static ValueWithUnit mach_min = new ValueWithUnit("Mach", "speed", 0.8f, "m/s", "km/h");
-		static ValueWithUnit mach_max = new ValueWithUnit("Mach", "speed", 1.2f, "m/s", "km/h");
+		static ValueWithUnit mach_min = new ValueWithUnit("Mach (min)", "speed", 0.8f, "m/s", "km/h");
+		static ValueWithUnit mach_max = new ValueWithUnit("Mach (max)", "speed", 1.2f, "m/s", "km/h");
 		static ValueWithUnit mach_fixed = new ValueWithUnit("Mach", "speed", 0.3f, "m/s", "km/h");
 
 		static float alpha_min = -45f;
@@ -230,6 +285,7 @@ namespace hexagonest.Tools
 			}
 
 			if (current_aircraft == null) {
+				// TODO: make this less terrible, dear lord
 				if (selected_prefab != null)
 				{
 					EditorGUILayout.LabelField($"An aircraft ({selected_prefab.name}) is available.");
@@ -291,7 +347,13 @@ namespace hexagonest.Tools
 			float gui_dt = time_now - last_gui_time;
 			last_gui_time = time_now;
 
-			current_mode = (simulation_mode)GUILayout.Toolbar((int)current_mode, mode_names);
+			//current_mode = (simulation_mode)GUILayout.Toolbar((int)current_mode, mode_names);
+			EditorGUI.BeginChangeCheck();
+			current_mode_index = GUILayout.Toolbar(current_mode_index, mode_names);
+			bool mode_changed = EditorGUI.EndChangeCheck();
+			if (mode_changed) {
+				current_mode = modes_available[current_mode_index];
+			}
 
 			bool cfg_changed = aircraft_panel(current_aircraft);
 
@@ -309,65 +371,63 @@ namespace hexagonest.Tools
 			if (ctrls_changed || (animate_surfaces && !simulating))
 				surfaces_moved = current_aircraft.set_controls(input_panel.inputs_obj, animate_surfaces ? gui_dt : 100f);
 
-			bool params_changed = ctrls_changed || cfg_changed;
-			switch (current_mode)
+			// present simulation parameters
+			Dictionary<string, bool> show_params = current_mode.parameters_shown;
+			bool params_changed = ctrls_changed || cfg_changed || mode_changed;
+
+			(float rho, float mach) = Simulation.isa_atm(altitude_fixed.current_value);
+
+			if (show_params.ContainsKey("airspeed_fixed"))
 			{
-				case simulation_mode.angle_sweep:
-					(float rho, float mach) = Simulation.isa_atm(altitude_fixed.current_value);
-
-					bool airspeed_changed = airspeed_fixed.present();
-					if (airspeed_changed) { mach_fixed.update_value(airspeed_fixed.current_value / mach); using_airspeed = true; }
-
-					bool mach_changed = mach_fixed.present_one("M", mach);
-					if (mach_changed) { airspeed_fixed.update_value(mach_fixed.current_value * mach); using_airspeed = false; }
-
-					bool altitude_changed = altitude_fixed.present();
-					if (altitude_changed)
-					{
-						var atmos = Simulation.isa_atm(altitude_fixed.current_value);
-						if (using_airspeed) mach_fixed.update_value(airspeed_fixed.current_value / atmos.mach);
-						else airspeed_fixed.update_value(mach_fixed.current_value * atmos.mach);
-					}
-
-					//EditorGUILayout.BeginHorizontal();
-					//EditorGUILayout.LabelField("Air density", $"{rho}kg/m³");
-					//EditorGUILayout.LabelField("Speed of sound", $"{mach}m/s");
-					//EditorGUILayout.LabelField("Dyn. pressure", $"{0.5 * rho * (airspeed_fixed.current_value * airspeed_fixed.current_value)}Pa");
-					//EditorGUILayout.EndHorizontal();
-
-					params_changed = params_changed || airspeed_changed || mach_changed || altitude_changed || cfg_changed;
-					//EditorGUILayout.BeginHorizontal();
-					//EditorGUILayout.LabelField("Sweep mode");
-					//angle_sweep_mode = (angle_mode)GUILayout.Toolbar((int)angle_sweep_mode, angle_mode_names);
-					//EditorGUILayout.EndHorizontal();
-					angle_sweep_mode = (angle_mode)EditorGUILayout.EnumPopup("Sweep mode", angle_sweep_mode);
-					bool alpha_changed = false, beta_changed = false;
-					switch (angle_sweep_mode)
-					{
-						case angle_mode.alpha:
-							alpha_changed = UI.present_two("Alpha range", ref alpha_min, "° min", ref alpha_max, "° max");
-							if (alpha_changed) params_changed = true;
-							beta_changed = UI.present_one("Fixed beta", ref beta_fixed, "°");
-							if (beta_changed) params_changed = true;
-							break;
-						case angle_mode.beta:
-							beta_changed = UI.present_two("Beta range", ref beta_min, "° min", ref beta_max, "° max");
-							if (beta_changed) params_changed = true;
-							alpha_changed = UI.present_one("Fixed alpha", ref alpha_fixed, "°");
-							if (alpha_changed) params_changed = true;
-							break;
-						default:
-							EditorGUILayout.HelpBox($"{angle_sweep_mode} unrecognized", MessageType.Info);
-							break;
-					}
-
-					//alpha_min = EditorGUILayout.FloatField("Min alpha (deg)", alpha_min);
-					//alpha_max = EditorGUILayout.FloatField("Max alpha (deg)", alpha_max);
-					break;
-				default:
-					EditorGUILayout.HelpBox($"{current_mode} not implemented yet.", MessageType.Info);
-					break;
+				if (airspeed_fixed.present(ref params_changed)) { mach_fixed.update_value(airspeed_fixed.current_value / mach); using_airspeed = true; }
+				if (mach_fixed.present_one(ref params_changed, "M")) { airspeed_fixed.update_value(mach_fixed.current_value * mach); using_airspeed = false; }
 			}
+			if (show_params.ContainsKey("airspeed_range"))
+			{
+				if (airspeed_min.present(ref params_changed)) { mach_min.update_value(airspeed_min.current_value / mach); using_airspeed = true; }
+				if (airspeed_max.present(ref params_changed)) { mach_max.update_value(airspeed_max.current_value / mach); using_airspeed = true; }
+
+				if (mach_min.present_one(ref params_changed, "M")) { airspeed_min.update_value(mach_min.current_value * mach); using_airspeed = false; }
+				if (mach_max.present_one(ref params_changed, "M")) { airspeed_max.update_value(mach_max.current_value * mach); using_airspeed = false; }
+			}
+
+			// mach_fixed, mach_range omitted because airspeed_fixed and airspeed_range already provide mach input
+
+			if (show_params.ContainsKey("altitude_fixed"))
+			{
+				if (altitude_fixed.present(ref params_changed))
+				{
+					var atmos = Simulation.isa_atm(altitude_fixed.current_value);
+					if (show_params.ContainsKey("airspeed_fixed")) {
+						if (using_airspeed) mach_fixed.update_value(airspeed_fixed.current_value / atmos.mach);
+						else mach_fixed.update_value(airspeed_fixed.current_value / atmos.mach);
+					}
+					if (show_params.ContainsKey("airspeed_range")) {
+						if (using_airspeed) {
+							mach_min.update_value(airspeed_min.current_value / atmos.mach);
+							mach_max.update_value(airspeed_max.current_value / atmos.mach);
+						} else {
+							airspeed_min.update_value(mach_min.current_value * atmos.mach);
+							airspeed_max.update_value(mach_max.current_value * atmos.mach);
+						}
+					}
+				}
+			}
+			if (show_params.ContainsKey("altitude_range"))
+			{
+				// TODO: figure out some way to explicitly define desired speed regardless of environment
+				// the speed of sound changes with altitude, so if you're (for some god forsaken reason) trying to sweep altitude
+				// at a constant speed of mach 1, the aircraft's actual velocity will have to change
+				// until then, not gonna bother updating speed values when altitude range changes, because it would be nonsensical
+				altitude_min.present(ref params_changed);
+				altitude_max.present(ref params_changed);
+			}
+
+			if (show_params.ContainsKey("alpha_range")) UI.present_two(ref params_changed, "Alpha range", ref alpha_min, "° min", ref alpha_max, "° max");
+			if (show_params.ContainsKey("beta_range")) UI.present_two(ref params_changed, "Beta range", ref beta_min, "° min", ref beta_max, "° max");
+
+			if (show_params.ContainsKey("alpha_fixed")) UI.present_one(ref params_changed, "Fixed alpha", ref alpha_fixed, "°");
+			if (show_params.ContainsKey("beta_fixed")) UI.present_one(ref params_changed, "Fixed beta", ref beta_fixed, "°");
 
 			EditorGUI.BeginChangeCheck();
 			simulation_steps = EditorGUILayout.IntSlider("Steps", simulation_steps, 5, 500);
@@ -390,10 +450,6 @@ namespace hexagonest.Tools
 			EditorGUI.DrawRect((Rect)graph_rect, new Color(0.15f, 0.15f, 0.15f));
 
 			update_results();
-
-
-			//airspeed_fixed = EditorGUILayout.DelayedFloatField("(m/s)", airspeed_fixed);
-			//altitude_fixed = EditorGUILayout.DelayedFloatField("Altitude (m):", altitude_fixed);
 		}
 
 
@@ -415,79 +471,161 @@ namespace hexagonest.Tools
 			//find_aircraft();
 			if (current_aircraft == null) { Debug.LogError("No aircraft selected, or no prefab available"); return; }
 
-			List<(string name, List<Vector2> points, Color color)> new_series = new List<(string name, List<Vector2> points, Color color)>();
+			List<graph_series> new_series = new List<graph_series>();
 
-			switch(current_mode)
+			// default visualizations, will only be displayed if the current mode populates them
+			graph_series lift_series = new graph_series { name = "L", color = new Color(0.4f, 0.4f, 1.0f) };
+			graph_series clift_series = new graph_series { name = "CL", color = new Color(0.4f, 0.5f, 1.0f) };
+			graph_series drag_series = new graph_series { name = "D", color = new Color(1.0f, 0.4f, 0.2f) };
+			graph_series cdrag_series = new graph_series { name = "CD", color = new Color(1.0f, 0.5f, 0.4f) };
+			graph_series ld_series = new graph_series { name = "L/D", color = new Color(1.0f, 0.6f, 0.2f) };
+
+			graph_series t_pitch_series = new graph_series { name = "T (pitch)", color = new Color(0.2f, 1.0f, 0.4f) };
+			graph_series t_yaw_series = new graph_series { name = "T (yaw)", color = new Color(0.4f, 1.0f, 0.8f) };
+			graph_series t_roll_series = new graph_series { name = "T (roll)", color = new Color(0.8f, 1.0f, 0.4f) };
+
+			// mode-specific
+			graph_series trim_series = new graph_series { name = "Trim", color = new Color(0.8f, 0.4f, 1.0f) };
+
+			new_series.AddRange(new[] {
+				lift_series, clift_series, drag_series, cdrag_series, ld_series,
+				t_pitch_series, t_yaw_series, t_roll_series
+			});
+
+			// initial values
+			float s_vel = airspeed_fixed.current_value;
+			float s_alt = altitude_fixed.current_value;
+			float s_alpha = alpha_fixed;
+			float s_beta = beta_fixed;
+
+			float min_index = float.MaxValue, max_index = -float.MaxValue;
+
+			for (int i = 0; i < simulation_steps; i++)
 			{
-				case simulation_mode.angle_sweep:
-					float speed = airspeed_fixed.current_value;
-					float alt = altitude_fixed.current_value;
-
-					float alpha_step = (alpha_max - alpha_min) / (simulation_steps - 1);
-					float beta_step = (beta_max - beta_min) / (simulation_steps - 1);
-
-					// lift is purely y-axis, drag purely -z, torque uhh.. x axis only?
-					List<Vector2> lift_series = new List<Vector2>(), drag_series = new List<Vector2>();
-					List<Vector2> torque_pitch_series = new List<Vector2>(), torque_yaw_series = new List<Vector2>(), torque_roll_series = new List<Vector2>();
-
-					for (int i = 0; i < simulation_steps; i++)
-					{
-						float this_alpha = angle_sweep_mode == angle_mode.alpha ? (alpha_min + i * (alpha_step)) : alpha_fixed;
-						float this_beta = angle_sweep_mode == angle_mode.beta ? (beta_min + i * (beta_step)) : beta_fixed;
-						(Vector3 total, Vector3 lift, Vector3 drag, Vector3 torque) = Simulation.aircraft_forces((AircraftData)current_aircraft, speed, alt, this_alpha * Mathf.Deg2Rad, this_beta * Mathf.Deg2Rad);
-						
-						float result_index = angle_sweep_mode == angle_mode.alpha ? this_alpha : this_beta;
-
-						lift_series.Add(new Vector2(result_index, total.y));
-						drag_series.Add(new Vector2(result_index, drag.magnitude));
-						torque_pitch_series.Add(new Vector2(result_index, torque.x));
-						torque_yaw_series.Add(new Vector2(result_index, torque.y));
-						torque_roll_series.Add(new Vector2(result_index, torque.z));
-					}
-					
-					new_series.Add((name: "Lift", points: lift_series, color: new Color(0.2f, 0.2f, 1.0f)));
-					new_series.Add((name: "Drag", points: drag_series, color: new Color(1.0f, 0.2f, 0.2f)));
-					new_series.Add((name: "T (pitch, +down)", points: torque_pitch_series, color: new Color(0.2f, 1.0f, 0.2f)));
-					new_series.Add((name: "T (yaw, +right)", points: torque_yaw_series, color: new Color(0.2f, 1.0f, 0.8f)));
-					new_series.Add((name: "T (roll, +right)", points: torque_roll_series, color: new Color(0.8f, 1.0f, 0.2f)));
-					
-					break;
-				default:
-					Debug.Log($"run_simulation() doesn't know how to simulate {current_mode}.");
-					break;
-			}
-
-			List<graph_series> series_compiled = new List<graph_series>();
-
-			Dictionary<string, bool> was_visible = new Dictionary<string, bool>();
-			if (has_simulation_data)
-			{
-				foreach (graph_series series in simulation_series)
+				switch(current_mode.sim_type)
 				{
-					was_visible[series.name] = series.visible;
+					case "trim_sweep":
+					case "alpha_sweep": s_alpha = alpha_min + (i * ((alpha_max - alpha_min) / (simulation_steps - 1))); break;
+					case "beta_sweep": s_beta = beta_min + (i * ((beta_max - beta_min) / (simulation_steps - 1))); break;
+					default: Debug.LogWarning($"unrecognized sim type {current_mode.sim_type}"); break;
 				}
+
+				Simulation.SimResults results = default;
+				float result_index = current_mode.sim_type switch
+				{
+					"alpha_sweep"	=> s_alpha,
+					"beta_sweep"	=> s_beta,
+					"trim_sweep"	=> s_alpha,
+					_				=> s_alpha
+				};
+
+				switch (current_mode.sim_type)
+				{
+					case "trim_sweep":
+						float a = -1f, c = float.NaN;
+						current_aircraft.set_controls(new ControlInputs { throttle = 0.5f, pitch = a });
+						float t_a = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad).torque.x;
+						float t_c = 0f;
+
+						float best_trim = a, best_torque = Mathf.Abs(t_a);
+
+						// start by refining [a,c] a bit
+						const int steps = 5;
+						for (int j = 1; j < steps + 1; j++)
+						{
+							float x = -1f + (2f * j / steps);
+							current_aircraft.set_controls(new ControlInputs { throttle = 0.5f, pitch = x });
+							float t_x = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad).torque.x;
+							if (Mathf.Abs(t_x) < best_torque) { best_trim = x; best_torque = Mathf.Abs(t_x); }
+							if (t_a * t_x <= 0f) { c = x; t_c = t_x; break; }
+							a = x; t_a = t_x;
+						}
+
+						float final_trim = best_trim;
+						if (!float.IsNaN(c)) {
+							// straightforward bisection, calculate torque at a, then at midpoint
+							// if it crosses zero, we overshot, refine the range to (a, b) and go again
+							// if it doesn't cross zero, undershot, refine the range to (b, c) and go again
+							for (int j = 0; j < 30; j++)
+							{
+								float b = (a + c) / 2f;
+								current_aircraft.set_controls(new ControlInputs { throttle = 0.5f, pitch = b });
+								float t_b = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad).torque.x;
+								if (Mathf.Abs(t_b) < 1f) break; // that's probably close enough
+
+								if ((t_a * t_b) <= 0f) c = b; // crossed zero, root between a,b
+								else { a = b; t_a = t_b; }  // didn't cross zero, root between b,c
+							}
+							final_trim = (a + c) / 2f;
+						}
+
+						current_aircraft.set_controls(new ControlInputs { throttle = 0.5f, pitch = final_trim });
+						results = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad);
+
+						trim_series.Add(new Vector2(result_index, final_trim));
+
+						current_aircraft.set_controls(input_panel.inputs_obj, 100f);
+						break;
+					default:
+						results = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad);
+						break;
+				}
+				
+				float total_lift = results.lift.y;//Math.Sign(results.lift.y) * results.lift.magnitude;
+				float total_drag = results.drag.magnitude;
+
+				float dyn_pres = 0.5f * Simulation.isa_atm(s_alt).rho * (s_vel * s_vel);
+				//Debug.Log($"Lift: {total_lift}, dyn pres: {dyn_pres}, wing area: {current_aircraft.physics.wing_area}");
+				clift_series.Add(new Vector2(result_index, total_lift / (dyn_pres * current_aircraft.physics.wing_area)));
+				cdrag_series.Add(new Vector2(result_index, total_drag / (dyn_pres * current_aircraft.physics.drag_area)));
+
+				float lift_drag_ratio = total_lift / total_drag;
+
+				// todo: figure out a good way for modes to add their own series outputs + choosing which of these to include
+				lift_series.Add(new Vector2(result_index, total_lift));
+				ld_series.Add(new Vector2(result_index, lift_drag_ratio));
+				drag_series.Add(new Vector2(result_index, total_drag));
+				t_pitch_series.Add(new Vector2(result_index, results.torque.x));
+				t_yaw_series.Add(new Vector2(result_index, results.torque.y));
+				t_roll_series.Add(new Vector2(result_index, results.torque.z));
+
+				min_index = Mathf.Min(min_index, result_index); max_index = Mathf.Max(max_index, result_index);
 			}
 
-			foreach ((string name, List<Vector2> points, Color color) series in new_series)
-			{
-				series_compiled.Add(new graph_series {
-					name = series.name,
-					points = series.points.ToArray(),
-					color = series.color,
-					visible = was_visible.ContainsKey(series.name) ? was_visible[series.name] : true
-				});
-			}
+			Dictionary<string, bool> was_visible = simulation_series.ToDictionary(entry => entry.name, entry => entry.visible);
 
-			(float x_min, float x_max, float y_min, float y_max) = UI.autofit_series(series_compiled);
-
-			float one_g_force = ((AircraftData)current_aircraft).physics.current_mass * Constants.G;
+			float one_g_force = current_aircraft.physics.current_mass * Constants.G;
 			graph_series one_g_line = new graph_series {
 				name = "1G",
 				color = Color.white,
-				points = new Vector2[2]{ new Vector2(x_min, one_g_force), new Vector2(x_max, one_g_force) },
+				points = new Vector2[2]{ new Vector2(min_index, one_g_force), new Vector2(max_index, one_g_force) },
 				visible = was_visible.ContainsKey("1G") ? was_visible["1G"] : true
 			};
-			series_compiled.Add(one_g_line);
+			new_series.Add(one_g_line);
+
+			// modify series before presentation
+			switch(current_mode.sim_type)
+			{
+				case "trim_sweep":
+					new_series.Remove(lift_series);
+					new_series.Remove(drag_series);
+					new_series.Add(trim_series);
+					float wing_pressure = current_aircraft.physics.wing_area * 0.5f * Simulation.isa_atm(s_alt).rho * (s_vel * s_vel);
+					one_g_line.points = one_g_line.points.Select(point => new Vector2(point.x, point.y / wing_pressure)).ToArray();
+					//one_g_line.name = "1G CL";
+					break;
+				default:
+					break;
+			}
+
+
+			List<graph_series> series_compiled = new_series.Where(entry => (entry._points.Count > 0 || entry.points.Length > 0)).Select(entry => {
+				entry.finish();
+				entry.visible = was_visible.ContainsKey(entry.name) ? was_visible[entry.name] : true;
+				return entry;
+			}).ToList();
+
+			(float x_min, float x_max, float y_min, float y_max) = UI.autofit_series(series_compiled);
 
 			simulation_series = series_compiled;
 			has_simulation_data = true;
@@ -503,11 +641,11 @@ namespace hexagonest.Tools
 			GameObject prefab_root = SimEnvironment.check_in_prefab("Stability test"); if (prefab_root == null) return;
 			AircraftData aircraft = AircraftUtils.get_data_from_prefab(prefab_root); AircraftPhysics physics = aircraft.physics;
 
-			(Vector3 total, Vector3 lift, Vector3 drag, Vector3 torque) = Simulation.aircraft_forces(aircraft, 100, 50, 5 * Mathf.Deg2Rad, 0);
+			Simulation.SimResults results = Simulation.aircraft_forces(aircraft, 100, 50, 5 * Mathf.Deg2Rad, 0);
 			Debug.Log($"Aircraft mass: {physics.dry_mass}, CG: {physics.dry_cg}");
-			Debug.Log($"Total force: {total}, lift: {lift}, drag: {drag}");
-			Debug.Log($"Lift/weight: {lift / (physics.dry_mass * Constants.G)}");
-			Debug.Log($"Aerodynamic torque: {torque}");
+			Debug.Log($"Total force: {results.total}, lift: {results.lift}, drag: {results.drag}");
+			Debug.Log($"Lift/weight: {results.lift / (physics.dry_mass * Constants.G)}");
+			Debug.Log($"Aerodynamic torque: {results.torque}");
 		}
 	}
 }

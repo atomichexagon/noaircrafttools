@@ -19,10 +19,27 @@ namespace hexagonest.Tools
 
 	public class graph_series
 	{
-		public string name;
-		public Color color;
-		public Vector2[] points;
+		public string name = "default";
+		public Color color = new Color(1.0f, 1.0f, 1.0f);
+		public List<Vector2> _points = new List<Vector2>();
+		public Vector2[] points = new Vector2[0];
 		public bool visible = true;
+
+		public void add(Vector2 point)
+		{
+			_points.Add(point);
+		}
+
+		public void Add(Vector2 point)
+		{
+			this.add(point);
+		}
+		
+		public graph_series finish()
+		{
+			if (_points.Count > 0) points = _points.ToArray();
+			return this; // convenience
+		}
 	}
 
 
@@ -107,7 +124,7 @@ namespace hexagonest.Tools
 			foreach (var s in series)
 			{
 				var content = new GUIContent(s.name);
-				float w = EditorStyles.miniLabel.CalcSize(content).x + 28f;
+				float w = EditorStyles.miniLabel.CalcSize(content).x + 16f; //28f;
 				Rect item = new Rect(lx, outer.y + 4, w, 16);
 				EditorGUI.DrawRect(new Rect(item.x + 2, item.y + 4, 8, 8), s.visible ? s.color : new Color(s.color.r, s.color.g, s.color.b, 0.25f));
 				s.visible = GUI.Toggle(new Rect(item.x + 14, item.y, w - 14, 16), s.visible, content, EditorStyles.miniLabel);
@@ -180,6 +197,16 @@ namespace hexagonest.Tools
 		public static float field_width = 100f;
 		public static float unit_width = 50f;
 
+
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
+		public static bool present_one(ref bool change_tracker, string field_name, ref float value, string unit1)
+		{
+			bool changed = present_one(field_name, ref value, unit1);
+			change_tracker |= changed;
+			return changed;
+		}
+
 		public static bool present_one(string field_name, ref float value, string unit1)
 		{
 			EditorGUILayout.BeginHorizontal();
@@ -198,6 +225,15 @@ namespace hexagonest.Tools
 			return has_changed;
 		}
 
+
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
+		public static bool present_two(ref bool change_tracker, string field_name, ref float value1, string unit1, ref float value2, string unit2)
+		{
+			bool changed = present_two(field_name, ref value1, unit1, ref value2, unit2);
+			change_tracker |= changed;
+			return changed;
+		}
 
 		public static bool present_two(string field_name, ref float value1, string unit1, ref float value2, string unit2)
 		{
@@ -221,6 +257,15 @@ namespace hexagonest.Tools
 			return has_changed;
 		}
 
+
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
+		public static bool present_one_with_conversion(ref bool change_tracker, string field_name, ref float value1, string unit1, float conversion_factor, string unit2)
+		{
+			bool changed = present_one_with_conversion(field_name, ref value1, unit1, conversion_factor, unit2);
+			change_tracker |= changed;
+			return changed;
+		}
 
 		public static bool present_one_with_conversion(string field_name, ref float value1, string unit1, float conversion_factor, string unit2)
 		{
@@ -327,6 +372,13 @@ namespace hexagonest.Tools
 			update_conversion();
 		}
 
+		public bool present(ref bool change_tracker, string unit1 = "", float conversion_mod = 1f)
+		{
+			bool changed = present(unit1, conversion_mod);
+			change_tracker |= changed;
+			return changed;
+		}
+
 		public bool present(string unit1 = "", float conversion_mod = 1f)
 		{
 			EditorGUILayout.BeginHorizontal(); EditorGUILayout.LabelField(field_name);
@@ -353,18 +405,24 @@ namespace hexagonest.Tools
 			return has_changed;
 		}
 
-		public bool present_one(string unit1 = "", float conversion_mod = 1f)
+		public bool present_one(ref bool change_tracker, string unit1 = "")
+		{
+			bool changed = present_one(unit1);
+			change_tracker |= changed;
+			return changed;
+		}
+
+		public bool present_one(string unit1 = "")
 		{
 			EditorGUILayout.BeginHorizontal(); EditorGUILayout.LabelField(field_name);
-
 			bool has_changed = false;
 
 			EditorGUI.BeginChangeCheck();
 			current_value = EditorGUILayout.DelayedFloatField("", current_value, GUILayout.Width(UI.field_width)); //, GUILayout.Width(75f)
 			if (EditorGUI.EndChangeCheck()) { has_changed = true; }
 			EditorGUILayout.LabelField(((unit1 != "") ? unit1 : reference_unit), GUILayout.Width(UI.unit_width));
-
 			EditorGUILayout.EndHorizontal();
+
 			if (has_changed) update_value(current_value);
 			return has_changed;
 		}
@@ -374,7 +432,7 @@ namespace hexagonest.Tools
 	[Serializable] public class ControlInputsPanel
 	{
 		public float pitch, roll, yaw, throttle, brake, custom_axis1;
-		public bool gear;
+		public bool gear, showing = false;
 		public ControlInputs inputs_obj
 		{
 			get => new ControlInputs {
@@ -383,7 +441,7 @@ namespace hexagonest.Tools
 		}
 
 		public ControlInputsPanel(
-			float _pitch = 0, float _roll = 0, float _yaw = 0, float _throttle = 0,
+			float _pitch = 0, float _roll = 0, float _yaw = 0, float _throttle = 0.5f,
 			float _brake = 0, float _custom_axis1 = 0, bool _gear = false
 		)
 		{
@@ -393,21 +451,24 @@ namespace hexagonest.Tools
 		public bool present(bool safe_to_edit = true)
 		{
 			EditorGUILayout.BeginHorizontal();
-			GUILayout.Label($"Aircraft controls{(!safe_to_edit ? " (unavailable outside of wind tunnel)" : "")}");
+			showing = EditorGUILayout.Foldout(showing, $"Aircraft controls{(!safe_to_edit ? " (unavailable outside of wind tunnel)" : "")}");
 			GUILayout.FlexibleSpace();
-
 			EditorGUI.BeginChangeCheck();
 			if (GUILayout.Button("Reset")) { pitch = 0; roll = 0; yaw = 0; throttle = 0; brake = 0; custom_axis1 = 0; }
 			EditorGUILayout.EndHorizontal();
 
-			pitch = EditorGUILayout.Slider("Pitch (+ down)", pitch, -1, 1);
-			roll = EditorGUILayout.Slider("Roll (+ right)", roll, -1, 1);
-			yaw = EditorGUILayout.Slider("Yaw (+ right)", yaw, -1, 1);
-			throttle = EditorGUILayout.Slider("Throttle", throttle, 0, 1);
-			brake = EditorGUILayout.Slider("Brake", brake, 0, 1);
-			custom_axis1 = EditorGUILayout.Slider("CustomAxis1", custom_axis1, 0, 1);
-			gear = EditorGUILayout.Toggle("Gear", gear);
-			return EditorGUI.EndChangeCheck();
+			if (showing)
+			{
+				pitch = EditorGUILayout.Slider("Pitch (+ down)", pitch, -1, 1);
+				roll = EditorGUILayout.Slider("Roll (+ right)", roll, -1, 1);
+				yaw = EditorGUILayout.Slider("Yaw (+ right)", yaw, -1, 1);
+				throttle = EditorGUILayout.Slider("Throttle", throttle, 0, 1);
+				brake = EditorGUILayout.Slider("Brake", brake, 0, 1);
+				custom_axis1 = EditorGUILayout.Slider("CustomAxis1", custom_axis1, 0, 1);
+				gear = EditorGUILayout.Toggle("Gear", gear);
+				return EditorGUI.EndChangeCheck();
+			}
+			return false;
 		}
 	}
 
