@@ -75,6 +75,12 @@ namespace hexagonest.Tools
 		public struct SimResults { public Vector3 total, lift, drag, torque; public SimForces forces; }
 
 
+		public static Vector3 velocity_vector(float v, float alpha, float beta)
+		{
+			return new Vector3(Mathf.Sin(beta), -Mathf.Sin(alpha), Mathf.Cos(alpha)).normalized * v;
+		}
+
+
 		// v - airspeed (m/s)
 		// h - altitude (meters)
 		// alpha - pitch angle of attack, + nose up

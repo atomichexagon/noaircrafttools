@@ -78,58 +78,45 @@ namespace hexagonest.Tools
 				"Sweeps alpha angles and finds zero-moment elevator input, fixed airspeed/altitude/beta. Calculates forces, L/D ratio, and aerodynamic moments.",
 				true, new string[] { "airspeed_fixed", "altitude_fixed", "alpha_range", "beta_fixed" }
 			),
+			new WindTunnelMode ("deflection_sweep", "Deflection sweep",
+				"Sweeps control range, fixed airspeed/altitude/alpha/beta. Calculates forces, L/D ratio, and aerodynamic moments.",
+				true, new string[] { "airspeed_fixed", "altitude_fixed", "alpha_fixed", "beta_fixed" }
+			),
 		};
 
-		// TODO: remove once WindTunnelModes are working
-		//enum simulation_mode {
-		//	angle_sweep, // fixed V/alpha/beta (mode dependent), sweep alpha/beta, calculate forces/l-d ratio/aero torques
-		//	trim_sweep, // fixed V/beta, sweep alpha, find zero-pitch elevator input, calculate forces/l-d ratio/aero torques
-		//	deflection_sweep, // fixed V/alpha/beta, sweep an input (pitch/yaw/roll) and calculate forces/l-d ratio/aero torques
-		//	//mach_sweep, // TBD - fixed alpha, sweep mach, calculate forces/l-d ratio/aero torques - maybe calculate acceleration?
-		//	//static_stability, // find aircraft's aerodynamic neutral point/static margin
-		//};
-
-		//static readonly ()[] mode_data = {
-		//	"Angle sweep",
-		//	"Trim sweep",
-		//	"Deflection sweep"
-		//	//"Mach sweep",
-		//	//"Static stability"
-		//};
-
-		static string[] mode_names = modes_available.Select(mode => mode.name).ToArray();
+		static GUIContent[] mode_names = modes_available.Select(mode => new GUIContent(mode.name, mode.description)).ToArray();
 		static WindTunnelMode current_mode = modes_available[0]; //simulation_mode.angle_sweep;
 		static int current_mode_index = 0;
-
-		// TODO: remove once WindTunnelModes are working
-		//enum angle_mode { alpha, beta };
-		//static readonly string[] angle_mode_names = { "Alpha", "Beta" };
-		//static angle_mode angle_sweep_mode = angle_mode.alpha;
 
 		// rerun simulation when parameters are changed
 		static bool simulate_on_change = true;
 
 		// direct controls
 		static ControlInputsPanel input_panel = new ControlInputsPanel();
-		static float last_gui_time = 0f; // for surface animation
+		static bool update_queued = false; // if gui_dt isn't high enough, it'll activate this to update when possible
+		static float target_update_time = 1f/60f; // rate limits aircraft updates
+		static float last_update_time = 0f; // for surface animation
 		static bool animate_surfaces = true; // move surfaces in real-time instead of instantly(ish)
 
 		// aircraft configuration
 		static bool show_aircraft_cfg = false;
 		static float fuel_level = 30f;
 
-		// state tracking for inputs
-		static bool using_airspeed = true; // true if airspeed (m/s or converted) was last changed, false if mach was last changed
-
 		// simulation parameters
 		static ValueWithUnit airspeed_min = new ValueWithUnit("Airspeed (min)", "speed", 100f, "m/s", "km/h");
 		static ValueWithUnit airspeed_max = new ValueWithUnit("Airspeed (max)", "speed", 200f, "m/s", "km/h");
 		static ValueWithUnit airspeed_fixed = new ValueWithUnit("Airspeed", "speed", 100f, "m/s", "km/h");
+
+		static bool using_mach = true; // true if airspeed was last changed by setting mach directly
+		static float airspeed_min_mach = 0.8f;
+		static float airspeed_max_mach = 1.2f;
+		static float airspeed_fixed_mach = 0.3f;
 		
 		static ValueWithUnit altitude_min = new ValueWithUnit("Altitude (min)", "distance", 0f, "m", "ft");
 		static ValueWithUnit altitude_max = new ValueWithUnit("Altitude (max)", "distance", 2500f, "m", "ft");
 		static ValueWithUnit altitude_fixed = new ValueWithUnit("Altitude", "distance", 50f, "m", "ft");
 
+		// not linked to airspeed parameters
 		static ValueWithUnit mach_min = new ValueWithUnit("Mach (min)", "speed", 0.8f, "m/s", "km/h");
 		static ValueWithUnit mach_max = new ValueWithUnit("Mach (max)", "speed", 1.2f, "m/s", "km/h");
 		static ValueWithUnit mach_fixed = new ValueWithUnit("Mach", "speed", 0.3f, "m/s", "km/h");
@@ -142,8 +129,11 @@ namespace hexagonest.Tools
 		static float beta_max = 45f;
 		static float beta_fixed = 0f;
 
+		static AircraftState current_params = new AircraftState(airspeed_fixed, altitude_fixed, alpha_fixed, beta_fixed);
+
 		static int simulation_steps = 81;
 		static bool simulating = false; // to lock out other behaviors while a sim is running
+		static bool was_updating = false; // allows smooth control movement without calling expensive .update() every frame
 
 		// display
 		static List<graph_series> simulation_series = new List<graph_series>();
@@ -155,6 +145,16 @@ namespace hexagonest.Tools
 		// status shenanigans
 		static string last_simenv_status = "";
 		static bool tunnel_collision_check = false;
+
+		static void OnEnable()
+		{
+			var atmos = Simulation.isa_atm(altitude_fixed.current_value);
+			airspeed_min_mach = airspeed_min.current_value / atmos.mach;
+			airspeed_max_mach = airspeed_max.current_value / atmos.mach;
+			airspeed_fixed_mach = airspeed_fixed.current_value / atmos.mach;
+
+			this.minSize = new Vector2(580f, 800f);
+		}
 
 		static void find_aircraft()
 		{
@@ -194,89 +194,145 @@ namespace hexagonest.Tools
 			//}
 		}
 
-		private bool aircraft_panel(AircraftData aircraft)
+		enum aircraft_panel_mode {
+			info,
+			loadout,
+			controls
+		}
+
+		static GUIContent[] aircraft_panel_mode_names = new GUIContent[] {
+			new GUIContent("Info", "Basic information"),
+			new GUIContent("Loadout", "Fuel, hardpoints"),
+			new GUIContent("Controls", "Flight controls")
+		};
+
+		static aircraft_panel_mode panel_mode = aircraft_panel_mode.info;
+
+		private (bool value_changed, bool ctrls_changed) aircraft_panel(AircraftData aircraft)
 		{
-			bool value_changed = false;
+			bool value_changed = false, ctrls_changed = false;
 			EditorGUILayout.BeginVertical("GroupBox");
 			EditorGUILayout.LabelField("Aircraft configuration", EditorStyles.boldLabel);
 
-			EditorGUILayout.BeginHorizontal();
-				EditorGUILayout.LabelField("Aircraft", GUILayout.Width(100f));
-				EditorGUILayout.LabelField(aircraft.param.FindProperty("aircraftName").stringValue, GUILayout.Width(100f));
-			EditorGUILayout.EndHorizontal();
-			
-			EditorGUILayout.BeginHorizontal();
-				EditorGUILayout.LabelField("Dry mass", GUILayout.Width(100f));
-				EditorGUILayout.LabelField($"{aircraft.physics.dry_mass}kg", GUILayout.Width(120f));
-			EditorGUILayout.EndHorizontal();
+			panel_mode = (aircraft_panel_mode)GUILayout.Toolbar((int)panel_mode, aircraft_panel_mode_names, "LargeButton");
 
-			EditorGUILayout.BeginHorizontal();
-				EditorGUILayout.LabelField("Fuel load", GUILayout.Width(100f));
-				EditorGUILayout.LabelField($"{aircraft.physics.fuel_mass}kg / {aircraft.physics.max_fuel_mass}kg", GUILayout.Width(120f));
-				EditorGUI.BeginChangeCheck();
-				fuel_level = EditorGUILayout.Slider(fuel_level, 0f, 100f);
-				if (EditorGUI.EndChangeCheck())
-				{
-					aircraft.set_fuel_fraction(fuel_level / 100f);
-					value_changed = true;
-				}
-			EditorGUILayout.EndHorizontal();
-			
-			EditorGUILayout.BeginHorizontal();
-				EditorGUILayout.LabelField("Current mass", GUILayout.Width(100f));
-				EditorGUILayout.LabelField($"{aircraft.physics.current_mass}kg", GUILayout.Width(120f));
-			EditorGUILayout.EndHorizontal();
-
-			EditorGUILayout.BeginVertical("GroupBox");
-			show_aircraft_cfg = EditorGUILayout.BeginFoldoutHeaderGroup(show_aircraft_cfg, "Hardpoint selection");
-			if (show_aircraft_cfg)
+			switch(panel_mode)
 			{
-				foreach (HardpointGroup group in aircraft.hardpoint_manager.hardpoint_groups)
-				{
+				case aircraft_panel_mode.info:
 					EditorGUILayout.BeginHorizontal();
-					EditorGUILayout.LabelField($"{group.name}", GUILayout.Width(160f));
-					EditorGUILayout.LabelField($"{group.mass}kg", GUILayout.Width(120f), GUILayout.ExpandWidth(true));
+					EditorGUILayout.LabelField($"Aircraft: {aircraft.param.FindProperty("aircraftName").stringValue}", GUILayout.Width(200f));
+					GUILayout.FlexibleSpace();
+					EditorGUILayout.LabelField($"{Math.Round(aircraft.physics.dry_mass, 2)}kg dry mass", GUILayout.Width(150f));
+					EditorGUILayout.EndHorizontal();
+					break;
+				case aircraft_panel_mode.loadout:
+					EditorGUILayout.BeginHorizontal();
+					EditorGUILayout.LabelField("Fuel load", GUILayout.Width(160f));
+					EditorGUILayout.LabelField($"{aircraft.physics.fuel_mass}kg / {aircraft.physics.max_fuel_mass}kg", GUILayout.Width(120f));
 					EditorGUI.BeginChangeCheck();
-					int new_selection = EditorGUILayout.Popup(group.currently_mounted, group.option_names, GUILayout.Width(240f), GUILayout.ExpandWidth(true));
+					fuel_level = EditorGUILayout.Slider(fuel_level, 0f, 100f);
 					if (EditorGUI.EndChangeCheck())
 					{
-						aircraft.hardpoint_manager.set_group_mounted_option(group.manager_index, new_selection);
+						aircraft.set_fuel_fraction(fuel_level / 100f);
 						value_changed = true;
 					}
 					EditorGUILayout.EndHorizontal();
-				}
+
+					foreach (HardpointGroup group in aircraft.hardpoint_manager.hardpoint_groups)
+					{
+						EditorGUILayout.BeginHorizontal();
+						EditorGUILayout.LabelField($"{group.name}", GUILayout.Width(160f));
+						EditorGUILayout.LabelField($"{group.mass}kg", GUILayout.Width(120f), GUILayout.ExpandWidth(true));
+						EditorGUI.BeginChangeCheck();
+						int new_selection = EditorGUILayout.Popup(group.currently_mounted, group.option_names, GUILayout.Width(240f), GUILayout.ExpandWidth(true));
+						if (EditorGUI.EndChangeCheck())
+						{
+							aircraft.hardpoint_manager.set_group_mounted_option(group.manager_index, new_selection);
+							value_changed = true;
+						}
+						EditorGUILayout.EndHorizontal();
+					}
+					break;
+				case aircraft_panel_mode.controls:
+					//EditorGUILayout.BeginVertical("GroupBox");
+					using (new EditorGUI.DisabledScope(!in_wind_tunnel))
+					{
+						ctrls_changed = input_panel.present(in_wind_tunnel);
+					}
+					//EditorGUILayout.EndVertical();
+					break;
+				default: goto case aircraft_panel_mode.info;
 			}
+			EditorGUILayout.LabelField("", GUI.skin.horizontalSlider);
+			// useful stats
+			EditorGUILayout.BeginHorizontal();
+			GUILayout.Label($"{Math.Round(aircraft.physics.current_mass, 2)}kg current");
+			GUILayout.FlexibleSpace();
+			GUILayout.Label($"{Math.Round(aircraft.physics.wing_area, 2)}m² wing");
+			GUILayout.FlexibleSpace();
+			GUILayout.Label($"{Math.Round(aircraft.physics.drag_area, 2)}m² drag");
+			GUILayout.FlexibleSpace();
+			GUILayout.Label($"{Math.Round(aircraft.physics.current_mass / aircraft.physics.wing_area, 2)}kg/m² loading");
+			EditorGUILayout.EndHorizontal();
+
+			// EditorGUILayout.BeginVertical("GroupBox");
+			// show_aircraft_cfg = EditorGUILayout.BeginFoldoutHeaderGroup(show_aircraft_cfg, "Hardpoint selection");
+			// if (show_aircraft_cfg)
+			// {
+			// 	foreach (HardpointGroup group in aircraft.hardpoint_manager.hardpoint_groups)
+			// 	{
+			// 		EditorGUILayout.BeginHorizontal();
+			// 		EditorGUILayout.LabelField($"{group.name}", GUILayout.Width(160f));
+			// 		EditorGUILayout.LabelField($"{group.mass}kg", GUILayout.Width(120f), GUILayout.ExpandWidth(true));
+			// 		EditorGUI.BeginChangeCheck();
+			// 		int new_selection = EditorGUILayout.Popup(group.currently_mounted, group.option_names, GUILayout.Width(240f), GUILayout.ExpandWidth(true));
+			// 		if (EditorGUI.EndChangeCheck())
+			// 		{
+			// 			aircraft.hardpoint_manager.set_group_mounted_option(group.manager_index, new_selection);
+			// 			value_changed = true;
+			// 		}
+			// 		EditorGUILayout.EndHorizontal();
+			// 	}
+			// }
+			// EditorGUILayout.EndVertical();
+			// EditorGUILayout.EndFoldoutHeaderGroup();
 			EditorGUILayout.EndVertical();
 
-			EditorGUILayout.EndFoldoutHeaderGroup();
-			EditorGUILayout.EndVertical();
-
-			return value_changed;
+			return (value_changed, ctrls_changed);
 		}
 
 		private void OnGUI()
 		{
+			// toolbar
 			EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-			//if (GUILayout.Button("Reset", EditorStyles.toolbarButton))
-			//{
-			//	Debug.Log("Reset");
-			//}
-			simulate_on_change = GUILayout.Toggle(simulate_on_change, "Run on change", EditorStyles.toolbarButton);
+			simulate_on_change = GUILayout.Toggle(simulate_on_change, new GUIContent("Auto run", "Automatically simulate when something changes"), EditorStyles.toolbarButton);
 			animate_surfaces = GUILayout.Toggle(animate_surfaces, "Animate surfaces", EditorStyles.toolbarButton);
 			GUILayout.FlexibleSpace();
-			GUILayout.Label(last_simenv_status, "ToolbarLabel");
-			GUILayout.Label(in_wind_tunnel ? "Wind tunnel" : "Prefab (some features disabled)", "ToolbarLabel");
-			
 			using (new EditorGUI.DisabledScope(current_aircraft == null))
 			{
-				if (GUILayout.Button("Mode select", EditorStyles.toolbarButton))
+				if (GUILayout.Button("Mode select", EditorStyles.toolbarButton)) { current_aircraft = null; }
+				if (GUILayout.Button("Rebuild", EditorStyles.toolbarButton)) // rebuild aircraft data to accomodate changes
 				{
-					current_aircraft = null;
+					current_aircraft.reset();
+					if (current_prefab == null) current_prefab = AircraftUtils.get_prefab_from_root(current_aircraft_object);
+					load_aircraft(current_aircraft_object, current_prefab);
+				}
+			}
+			using (new EditorGUI.DisabledScope(current_aircraft == null || !SimEnvironment.check_in_sim_scene(current_aircraft)))
+			{
+				if (GUILayout.Button("Reset", EditorStyles.toolbarButton)) // 
+				{
+					if (current_prefab == null) current_prefab = AircraftUtils.get_prefab_from_root(current_aircraft_object);
+					(GameObject container, GameObject new_aircraft, string status) = SimEnvironment.setup_wind_tunnel(current_prefab, true);
+					last_simenv_status = status;
+					load_aircraft(new_aircraft, current_prefab);
+					new_aircraft.transform.localPosition = -current_aircraft.physics.dry_cg;
 				}
 			}
 			EditorGUILayout.EndHorizontal();
 
 			var selector_data = WindTunnel_Target.instance;
+			if (this.minSize.x < selector_data.min_size.x) this.minSize = selector_data.min_size;
 			GameObject selected_prefab = selector_data.aircraft_prefab;
 
 			if (selected_prefab != null && selected_prefab != current_prefab)
@@ -344,8 +400,9 @@ namespace hexagonest.Tools
 			SimEnvironment.is_in_sim_scene = in_wind_tunnel;
 
 			float time_now = Time.realtimeSinceStartup;
-			float gui_dt = time_now - last_gui_time;
-			last_gui_time = time_now;
+			float gui_dt = time_now - last_update_time;
+			bool can_update = gui_dt > target_update_time;
+			if (can_update) last_update_time = time_now;
 
 			//current_mode = (simulation_mode)GUILayout.Toolbar((int)current_mode, mode_names);
 			EditorGUI.BeginChangeCheck();
@@ -355,21 +412,10 @@ namespace hexagonest.Tools
 				current_mode = modes_available[current_mode_index];
 			}
 
-			bool cfg_changed = aircraft_panel(current_aircraft);
+			(bool cfg_changed, bool ctrls_changed) = aircraft_panel(current_aircraft);
 
 			EditorGUILayout.BeginVertical("GroupBox");
 			EditorGUILayout.LabelField("Simulation parameters", EditorStyles.boldLabel);
-
-			bool ctrls_changed = false;
-			EditorGUILayout.BeginVertical("GroupBox");
-			using (new EditorGUI.DisabledScope(!in_wind_tunnel))
-			{
-				ctrls_changed = input_panel.present(in_wind_tunnel);
-			}
-			EditorGUILayout.EndVertical();
-			bool surfaces_moved = false;
-			if (ctrls_changed || (animate_surfaces && !simulating))
-				surfaces_moved = current_aircraft.set_controls(input_panel.inputs_obj, animate_surfaces ? gui_dt : 100f);
 
 			// present simulation parameters
 			Dictionary<string, bool> show_params = current_mode.parameters_shown;
@@ -379,16 +425,19 @@ namespace hexagonest.Tools
 
 			if (show_params.ContainsKey("airspeed_fixed"))
 			{
-				if (airspeed_fixed.present(ref params_changed)) { mach_fixed.update_value(airspeed_fixed.current_value / mach); using_airspeed = true; }
-				if (mach_fixed.present_one(ref params_changed, "M")) { airspeed_fixed.update_value(mach_fixed.current_value * mach); using_airspeed = false; }
+				airspeed_fixed.present_extra(ref params_changed, ref airspeed_fixed_mach, ref using_mach, "", "M", 1f/mach);
+				//if (airspeed_fixed.present(ref params_changed)) { mach_fixed.update_value(airspeed_fixed.current_value / mach); using_airspeed = true; }
+				//if (mach_fixed.present_one(ref params_changed, "M")) { airspeed_fixed.update_value(mach_fixed.current_value * mach); using_airspeed = false; }
 			}
 			if (show_params.ContainsKey("airspeed_range"))
 			{
-				if (airspeed_min.present(ref params_changed)) { mach_min.update_value(airspeed_min.current_value / mach); using_airspeed = true; }
-				if (airspeed_max.present(ref params_changed)) { mach_max.update_value(airspeed_max.current_value / mach); using_airspeed = true; }
+				airspeed_min.present_extra(ref params_changed, ref airspeed_min_mach, ref using_mach, "", "M", 1f/mach);
+				airspeed_max.present_extra(ref params_changed, ref airspeed_min_mach, ref using_mach, "", "M", 1f/mach);
+				// if (airspeed_min.present(ref params_changed)) { mach_min.update_value(airspeed_min.current_value / mach); using_airspeed = true; }
+				// if (airspeed_max.present(ref params_changed)) { mach_max.update_value(airspeed_max.current_value / mach); using_airspeed = true; }
 
-				if (mach_min.present_one(ref params_changed, "M")) { airspeed_min.update_value(mach_min.current_value * mach); using_airspeed = false; }
-				if (mach_max.present_one(ref params_changed, "M")) { airspeed_max.update_value(mach_max.current_value * mach); using_airspeed = false; }
+				// if (mach_min.present_one(ref params_changed, "M")) { airspeed_min.update_value(mach_min.current_value * mach); using_airspeed = false; }
+				// if (mach_max.present_one(ref params_changed, "M")) { airspeed_max.update_value(mach_max.current_value * mach); using_airspeed = false; }
 			}
 
 			// mach_fixed, mach_range omitted because airspeed_fixed and airspeed_range already provide mach input
@@ -399,26 +448,34 @@ namespace hexagonest.Tools
 				{
 					var atmos = Simulation.isa_atm(altitude_fixed.current_value);
 					if (show_params.ContainsKey("airspeed_fixed")) {
-						if (using_airspeed) mach_fixed.update_value(airspeed_fixed.current_value / atmos.mach);
-						else mach_fixed.update_value(airspeed_fixed.current_value / atmos.mach);
+						if (using_mach) airspeed_fixed.update_value(airspeed_fixed_mach * atmos.mach);
 					}
 					if (show_params.ContainsKey("airspeed_range")) {
-						if (using_airspeed) {
-							mach_min.update_value(airspeed_min.current_value / atmos.mach);
-							mach_max.update_value(airspeed_max.current_value / atmos.mach);
-						} else {
-							airspeed_min.update_value(mach_min.current_value * atmos.mach);
-							airspeed_max.update_value(mach_max.current_value * atmos.mach);
+						if (using_mach) {
+							airspeed_min.update_value(airspeed_min_mach * atmos.mach);
+							airspeed_max.update_value(airspeed_max_mach * atmos.mach);
 						}
 					}
+					// if (show_params.ContainsKey("airspeed_fixed")) {
+					// 	if (using_airspeed) mach_fixed.update_value(airspeed_fixed.current_value / atmos.mach);
+					// 	else mach_fixed.update_value(airspeed_fixed.current_value / atmos.mach);
+					// }
+					// if (show_params.ContainsKey("airspeed_range")) {
+					// 	if (using_airspeed) {
+					// 		mach_min.update_value(airspeed_min.current_value / atmos.mach);
+					// 		mach_max.update_value(airspeed_max.current_value / atmos.mach);
+					// 	} else {
+					// 		airspeed_min.update_value(mach_min.current_value * atmos.mach);
+					// 		airspeed_max.update_value(mach_max.current_value * atmos.mach);
+					// 	}
+					// }
 				}
 			}
+			
+			// if a mode is using altitude_range, it must decide if it wants to use mach (speed will vary with altitude) or airspeed
+			// airspeed will give the same velocity at all altitudes, mach will be faster at sea level and slower high up
 			if (show_params.ContainsKey("altitude_range"))
 			{
-				// TODO: figure out some way to explicitly define desired speed regardless of environment
-				// the speed of sound changes with altitude, so if you're (for some god forsaken reason) trying to sweep altitude
-				// at a constant speed of mach 1, the aircraft's actual velocity will have to change
-				// until then, not gonna bother updating speed values when altitude range changes, because it would be nonsensical
 				altitude_min.present(ref params_changed);
 				altitude_max.present(ref params_changed);
 			}
@@ -433,7 +490,19 @@ namespace hexagonest.Tools
 			simulation_steps = EditorGUILayout.IntSlider("Steps", simulation_steps, 5, 500);
 			if (EditorGUI.EndChangeCheck()) params_changed = true;
 
-			if ((simulate_on_change && params_changed) || (animate_surfaces && surfaces_moved && !simulating))
+			if (params_changed) current_params = new AircraftState(airspeed_fixed, altitude_fixed, alpha_fixed, beta_fixed);
+
+			if (!simulating & (params_changed || was_updating || update_queued)) {
+				// keeps itself running with was_updating to allow smooth movement
+				if (can_update)
+				{
+					was_updating = current_aircraft.update(current_params, input_panel.inputs_obj, animate_surfaces ? gui_dt : 100f);
+					update_queued = false;
+				}
+				else update_queued = true;
+			}
+
+			if (!simulating && simulate_on_change && (params_changed || was_updating))
 			{
 				run_simulation();
 			}
@@ -448,6 +517,12 @@ namespace hexagonest.Tools
 
 			graph_rect = GUILayoutUtility.GetRect(100, 100, 250, 10000, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
 			EditorGUI.DrawRect((Rect)graph_rect, new Color(0.15f, 0.15f, 0.15f));
+
+			EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+			GUILayout.Label(last_simenv_status, "ToolbarLabel");
+			GUILayout.FlexibleSpace();
+			GUILayout.Label(in_wind_tunnel ? "In wind tunnel" : "In prefab", "ToolbarLabel");
+			EditorGUILayout.EndHorizontal();
 
 			update_results();
 		}
@@ -465,7 +540,7 @@ namespace hexagonest.Tools
 		}
 
 
-		private void run_simulation()
+		private void run_simulation(float dt = 1f)
 		{
 			simulating = true;
 			//find_aircraft();
@@ -500,6 +575,8 @@ namespace hexagonest.Tools
 
 			float min_index = float.MaxValue, max_index = -float.MaxValue;
 
+			AircraftState sim_params = new AircraftState(s_vel, s_alt, s_alpha, s_beta);
+
 			for (int i = 0; i < simulation_steps; i++)
 			{
 				switch(current_mode.sim_type)
@@ -519,11 +596,14 @@ namespace hexagonest.Tools
 					_				=> s_alpha
 				};
 
+				// rebuild to accomodate state changes
+				sim_params = new AircraftState(s_vel, s_alt, s_alpha, s_beta);
+
 				switch (current_mode.sim_type)
 				{
 					case "trim_sweep":
 						float a = -1f, c = float.NaN;
-						current_aircraft.set_controls(new ControlInputs { throttle = 0.5f, pitch = a });
+						current_aircraft.update(sim_params, new ControlInputs { throttle = 0.5f, pitch = a });
 						float t_a = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad).torque.x;
 						float t_c = 0f;
 
@@ -534,7 +614,7 @@ namespace hexagonest.Tools
 						for (int j = 1; j < steps + 1; j++)
 						{
 							float x = -1f + (2f * j / steps);
-							current_aircraft.set_controls(new ControlInputs { throttle = 0.5f, pitch = x });
+							current_aircraft.update(sim_params, new ControlInputs { throttle = 0.5f, pitch = x });
 							float t_x = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad).torque.x;
 							if (Mathf.Abs(t_x) < best_torque) { best_trim = x; best_torque = Mathf.Abs(t_x); }
 							if (t_a * t_x <= 0f) { c = x; t_c = t_x; break; }
@@ -549,7 +629,7 @@ namespace hexagonest.Tools
 							for (int j = 0; j < 30; j++)
 							{
 								float b = (a + c) / 2f;
-								current_aircraft.set_controls(new ControlInputs { throttle = 0.5f, pitch = b });
+								current_aircraft.update(sim_params, new ControlInputs { throttle = 0.5f, pitch = b });
 								float t_b = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad).torque.x;
 								if (Mathf.Abs(t_b) < 1f) break; // that's probably close enough
 
@@ -559,14 +639,15 @@ namespace hexagonest.Tools
 							final_trim = (a + c) / 2f;
 						}
 
-						current_aircraft.set_controls(new ControlInputs { throttle = 0.5f, pitch = final_trim });
+						current_aircraft.update(sim_params, new ControlInputs { throttle = 0.5f, pitch = final_trim });
 						results = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad);
 
 						trim_series.Add(new Vector2(result_index, final_trim));
 
-						current_aircraft.set_controls(input_panel.inputs_obj, 100f);
+						current_aircraft.update(sim_params, input_panel.inputs_obj, 100f);
 						break;
 					default:
+						//current_aircraft.update(sim_params, input_panel.inputs_obj);
 						results = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad);
 						break;
 				}

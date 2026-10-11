@@ -10,10 +10,40 @@ using static hexagonest.Tools.Utilities;
 namespace hexagonest.Tools
 {
 	// input simulator
-	[Serializable] public class ControlInputs {
+	[Serializable] public class ControlInputs
+	{
 		public float pitch = 0, roll = 0, yaw = 0, throttle = 0, brake = 0, custom_axis1 = 0;
 		public bool gear = false; // blow my head off
 		// TODO: simulate gear drag?
+	}
+
+	// for objects wearing a context hat
+	[Serializable] public class AircraftState
+	{
+		public float airspeed = 100f, altitude = 50f, alpha = 0f, beta = 0f; // NOT in degrees!
+		public Vector3 velocity = new Vector3(0f, 0f, 50f);
+
+		// from numbers (in degrees)
+		public AircraftState(float _airspeed, float _altitude, float _alpha, float _beta)
+		{
+			airspeed = _airspeed; altitude = _altitude;
+			alpha = _alpha * Mathf.Deg2Rad; beta = _beta * Mathf.Deg2Rad;
+			velocity = Simulation.velocity_vector(_airspeed, alpha * Mathf.Deg2Rad, beta * Mathf.Deg2Rad);
+		}
+
+		// from params (also in degrees)
+		public AircraftState(ValueWithUnit _airspeed, ValueWithUnit _altitude, float _alpha, float _beta)
+			: this(_airspeed.current_value, _altitude.current_value, _alpha, _beta) {}
+	}
+
+	// to simplify aircraft update logic
+	public abstract class Simulated
+	{
+		// return true if something changed to trigger a sim update (if auto run is on)
+		public abstract bool update(ref AircraftState context, ref ControlInputs inputs, float dt);
+
+		// reset any transformations or changes to the actual gameobjects/transforms
+		public abstract void reset();
 	}
 
 
@@ -26,10 +56,13 @@ namespace hexagonest.Tools
 		public Part[] parts;
 		public Dictionary<Component, Part> part_lookup;
 		public ControlSurface[] control_surfaces;
+		public HighLiftDevice[] high_lift_devices;
 		public Tank[] tanks;
 		public float fuel_fraction;
 		public Airfoil[] airfoils;
 		public HardpointManager hardpoint_manager;
+		public Simulated[] simulated_objects;
+		public AircraftState last_aircraft_state;
 		public ControlInputs last_controls_state;
 
 		public AircraftData(GameObject aircraft_root) {
@@ -57,13 +90,28 @@ namespace hexagonest.Tools
 					aircraft_tanks.Add((Tank)new_part.fuel_tank);
 				}
 			}
+			parts = aircraft_parts.ToArray();
+			tanks = aircraft_tanks.ToArray();
+
+			List<Simulated> simulated_list = new List<Simulated>();
+
+			// SweptWingController
 
 			control_surfaces = root.GetComponentsInChildren(game_type("ControlSurface"), true)
 				.Select(comp => new ControlSurface(this, comp))
 				.ToArray();
+			simulated_list.AddRange(control_surfaces);
 
-			parts = aircraft_parts.ToArray();
-			tanks = aircraft_tanks.ToArray();
+			// ControlSurfacePhysics?
+
+			high_lift_devices = root.GetComponentsInChildren(game_type("HighLiftDevice"), true)
+				.Select(comp => new HighLiftDevice(this, comp))
+				.ToArray();
+			simulated_list.AddRange(high_lift_devices);
+
+			// Gear?
+			
+			simulated_objects = simulated_list.ToArray();
 
 			// process airfoils
 			List<Airfoil> aircraft_foils = new List<Airfoil>();
@@ -76,6 +124,7 @@ namespace hexagonest.Tools
 				AnimationCurve drag = find_prop_rel<AnimationCurve>(foil, "dragCoef");
 				aircraft_foils.Add(new Airfoil { name = name, lift = lift, drag = drag });
 			}
+			airfoils = aircraft_foils.ToArray();
 
 			var weapon_manager_obj = find_prop<Component>(aircraft, "weaponManager");
 			if (weapon_manager_obj != null)
@@ -83,7 +132,6 @@ namespace hexagonest.Tools
 				var s_weps = new SerializedObject(weapon_manager_obj);
 				hardpoint_manager = new HardpointManager(physics, s_weps);
 			}
-			airfoils = aircraft_foils.ToArray();
 			physics.recalculate();
 		}
 
@@ -94,12 +142,28 @@ namespace hexagonest.Tools
 			physics.quick_recalculate();
 		}
 
+		// updates everything and forces AircraftPhysics to recalculate afterwards to be as accurate as possible
+		public bool update(AircraftState context, ControlInputs inputs, float dt = 100f)
+		{
+			bool changed = false;
+			Array.ForEach(simulated_objects, sim_obj => changed = sim_obj.update(ref context, ref inputs, dt) ? true : changed);
+			if (changed) physics.recalculate(); // gonna be slow
+			return changed;
+		}
+
+		// only updates control surfaces
 		public bool set_controls(ControlInputs new_controls, float dt = 100f)
 		{
 			bool surfaces_moved = false;
-			Array.ForEach(control_surfaces, surface => surfaces_moved = surface.actuate(new_controls, dt) ? true : surfaces_moved);
+			Array.ForEach(control_surfaces, surface => surfaces_moved = surface.actuate(ref new_controls, dt) ? true : surfaces_moved);
 			last_controls_state = new_controls;
 			return surfaces_moved;
+		}
+
+		// reset all simulated components
+		public void reset()
+		{
+			Array.ForEach(simulated_objects, sim_obj => sim_obj.reset());
 		}
 	}
 
@@ -199,9 +263,115 @@ namespace hexagonest.Tools
 		}
 	}
 
+	// TODO: SwingWingController
+	// [Serializable] public class SwingWingController : Simulated
+	// {
+	// 	public float position;
+
+	// 	public override bool update(ref AircraftState context, ref ControlInputs inputs, float dt)
+	// 	{
+	// 		return false;
+	// 	}
+
+	// 	public override void reset()
+	// 	{
+
+	// 	}
+	// }
+
+	[Serializable] public class HighLiftDevice : Simulated
+	{
+		public AircraftData parent_aircraft; // only really needed to look for attached_part
+		public Part attached_part;
+		public Transform device_transform;
+		//public SwingWingController swing_controller; // oh no
+		public float speed_deploy, speed_retract, alpha_min, alpha_factor, deployed_area;
+		public float part_area_retracted, part_area_deployed;
+		public float position = 0f; // current state
+
+		public struct MovingPart {
+			public bool move, rotate;
+			public Transform transform;
+			public Vector3 position_retracted, position_deployed, angles_retracted, angles_deployed;
+
+			public void animate(float amount)
+			{
+				if (move) transform.localPosition = Vector3.Lerp(position_retracted, position_deployed, amount);
+				if (rotate) transform.localEulerAngles = Vector3.Lerp(angles_retracted, angles_deployed, amount);
+			}
+		}
+		public MovingPart[] moving_parts;
+
+		public HighLiftDevice(AircraftData parent, Component device_comp)
+		{
+			parent_aircraft = parent;
+			var s_device = new SerializedObject(device_comp);
+			device_transform = device_comp.gameObject.transform;
+
+			attached_part = parent_aircraft.part_lookup[find_prop<Component>(s_device, "aeroPart")];
+			speed_deploy = find_prop<float>(s_device, "speedDeployed");
+			speed_retract = find_prop<float>(s_device, "speedRetracted");
+			alpha_min = find_prop<float>(s_device, "alphaMin");
+			alpha_factor = find_prop<float>(s_device, "alphaFactor");
+			deployed_area = find_prop<float>(s_device, "deployedArea");
+			var s_moving_parts = find_prop(s_device, "movingParts");
+
+			moving_parts = new MovingPart[s_moving_parts.arraySize];
+			for (int j = 0; j < s_moving_parts.arraySize; j++) {
+				var part_data = s_moving_parts.GetArrayElementAtIndex(j);
+
+				moving_parts[j] = new MovingPart {
+					move = find_prop_rel<bool>(part_data, "move"),
+					rotate = find_prop_rel<bool>(part_data, "rotate"),
+					transform = find_prop_rel<Transform>(part_data, "transform"),
+					position_retracted = find_prop_rel<Vector3>(part_data, "positionRetracted"),
+					position_deployed = find_prop_rel<Vector3>(part_data, "positionDeployed"),
+					angles_retracted = find_prop_rel<Vector3>(part_data, "anglesRetracted"),
+					angles_deployed = find_prop_rel<Vector3>(part_data, "anglesDeployed")
+				};
+			}
+		}
+
+		public override bool update(ref AircraftState context, ref ControlInputs inputs, float dt)
+		{
+			float target_position = Mathf.Clamp01(1f - Mathf.Max(context.airspeed - speed_deploy, 0f) / (speed_retract - speed_deploy));
+			// TODO: since this checks swing_controller, we should probably make sure swing_controller updates before high lift devices
+			// (once that exists)
+			// if (swing_controller != null && swing_controller.position > 0f)
+			// {
+			// 	num = 0f;
+			// }
+			if (alpha_factor > 0f)
+			{
+				Vector3 rel_vel = device_transform.InverseTransformDirection(context.velocity);
+				float f = Mathf.Atan2(rel_vel.y, rel_vel.z) * -Mathf.Rad2Deg;
+				target_position += Mathf.Clamp01(Mathf.Abs(f) - alpha_min) * alpha_factor;
+			}
+			bool changed = false;
+			if (Mathf.Abs(target_position - position) > 0.001f)
+			{
+				position += Mathf.Clamp(target_position - position, -dt, dt);
+				attached_part.current_physics.wing_area = Mathf.Lerp(part_area_retracted, part_area_deployed, position);
+				
+				if (SimEnvironment.check_in_sim_scene(parent_aircraft))
+				{
+					Array.ForEach(moving_parts, part => part.animate(position));
+					changed = true;
+				}
+			}
+			return changed;
+		}
+
+		public override void reset()
+		{
+			if (!SimEnvironment.check_in_sim_scene(parent_aircraft)) return;
+			Array.ForEach(moving_parts, part => part.animate(0f));
+		}
+	}
 
 
-	[Serializable] public class ControlSurface
+
+	[Serializable] public class ControlSurface : Simulated
 	{
 		public AircraftData parent_aircraft; // only really needed to look for attached_part
 		public GameObject surface_object;
@@ -246,8 +416,13 @@ namespace hexagonest.Tools
 			attached_part.control_surface = this;
 		}
 
+		public override bool update(ref AircraftState context, ref ControlInputs inputs, float dt)
+		{
+			return actuate(ref inputs, dt);
+		}
+
 		// dt is here for futureproofing i guess, in the horrible event that we end up doing dynamic sims
-		public bool actuate(ControlInputs inputs, float dt = 100f)
+		public bool actuate(ref ControlInputs inputs, float dt = 100f)
 		{
 			float servo_delta = servo_speed * dt;
 			if (!is_flap)
@@ -291,6 +466,17 @@ namespace hexagonest.Tools
 			bool changed = (last_angle != main_angle) || (last_split != split_amount);
 			last_angle = main_angle; last_split = split_amount;
 			return changed;
+		}
+
+		public override void reset()
+		{
+			if (!SimEnvironment.check_in_sim_scene(parent_aircraft)) return;
+			visible_mesh.transform.localRotation = resting_rotation;
+			if (max_split > 0f)
+			{
+				split_upper.transform.localRotation = resting_split_rotation;
+				split_lower.transform.localRotation = resting_split_rotation;
+			}
 		}
 	}
 

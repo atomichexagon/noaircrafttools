@@ -194,9 +194,48 @@ namespace hexagonest.Tools
 		}
 
 
-		public static float field_width = 100f;
+		public static float field_width = 148f;
 		public static float unit_width = 50f;
 
+		public static float field_width_thin = 80f;
+		public static float unit_width_thin = 50f;
+
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
+		public static bool present_field(ref bool change_tracker, ref float value, string unit = "", float conversion = 1f, float f_width = 0f, float u_width = 0f)
+		{
+			bool this_changed = present_field(ref value, unit, conversion, f_width, u_width);
+			change_tracker |= this_changed;
+			return this_changed;
+		}
+
+		// generic float field presenter including optional unit and handling conversions automatically
+		// pass "`" as unit to not draw the unit field
+		public static bool present_field(ref float value, string unit = "", float conversion = 1f, float f_width = 0f, float u_width = 0f)
+		{
+			EditorGUI.BeginChangeCheck();
+			float new_value = EditorGUILayout.FloatField("", value * conversion, GUILayout.Width(f_width == 0f ? field_width : f_width));
+			bool this_changed = EditorGUI.EndChangeCheck();
+			if (this_changed) value = new_value / conversion;
+			if (unit != "`") EditorGUILayout.LabelField(unit, GUILayout.Width(u_width == 0f ? unit_width : u_width));
+			return this_changed;
+		}
+
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
+		public static bool present_dropdown(ref bool change_tracker, ref int current_index, ref string[] options, float u_width = 0f)
+		{
+			bool changed = present_dropdown(ref current_index, ref options, u_width);
+			change_tracker |= changed;
+			return changed;
+		}
+
+		public static bool present_dropdown(ref int current_index, ref string[] options, float u_width = 0f)
+		{
+			EditorGUI.BeginChangeCheck();
+			current_index = EditorGUILayout.Popup(current_index, options, GUILayout.Width(u_width == 0f ? unit_width : u_width));
+			return EditorGUI.EndChangeCheck();
+		}
 
 
 		// supports passing a reference bool so that change tracking doesn't require an extra statement
@@ -210,16 +249,11 @@ namespace hexagonest.Tools
 		public static bool present_one(string field_name, ref float value, string unit1)
 		{
 			EditorGUILayout.BeginHorizontal();
-			EditorGUILayout.LabelField(field_name);
+			GUILayout.Label(field_name, GUILayout.ExpandWidth(true));
+			GUILayout.FlexibleSpace();
 
 			bool has_changed = false;
-
-			EditorGUI.BeginChangeCheck();
-			value = EditorGUILayout.DelayedFloatField(value, GUILayout.Width(field_width)); //, GUILayout.Width(75f)
-			if (EditorGUI.EndChangeCheck()) {
-				has_changed = true;
-			}
-			EditorGUILayout.LabelField(unit1, GUILayout.Width(unit_width));
+			present_field(ref has_changed, ref value, unit1);
 			EditorGUILayout.EndHorizontal();
 
 			return has_changed;
@@ -238,19 +272,12 @@ namespace hexagonest.Tools
 		public static bool present_two(string field_name, ref float value1, string unit1, ref float value2, string unit2)
 		{
 			EditorGUILayout.BeginHorizontal();
-			EditorGUILayout.LabelField(field_name);
+			GUILayout.Label(field_name, GUILayout.ExpandWidth(true));
+			GUILayout.FlexibleSpace();
 
 			bool has_changed = false;
-
-			EditorGUI.BeginChangeCheck();
-			value1 = EditorGUILayout.DelayedFloatField(value1, GUILayout.Width(field_width)); //, GUILayout.Width(75f)
-			if (EditorGUI.EndChangeCheck()) has_changed = true;
-			EditorGUILayout.LabelField(unit1, GUILayout.Width(unit_width));
-
-			EditorGUI.BeginChangeCheck();
-			value2 = EditorGUILayout.DelayedFloatField(value2, GUILayout.Width(field_width)); //, GUILayout.Width(75f)
-			if (EditorGUI.EndChangeCheck()) has_changed = true;
-			EditorGUILayout.LabelField(unit2, GUILayout.Width(unit_width));
+			present_field(ref has_changed, ref value1, unit1);
+			present_field(ref has_changed, ref value2, unit2);
 
 			EditorGUILayout.EndHorizontal();
 
@@ -270,25 +297,14 @@ namespace hexagonest.Tools
 		public static bool present_one_with_conversion(string field_name, ref float value1, string unit1, float conversion_factor, string unit2)
 		{
 			EditorGUILayout.BeginHorizontal();
-			EditorGUILayout.LabelField(field_name);
+			GUILayout.Label(field_name, GUILayout.ExpandWidth(true));
+			GUILayout.FlexibleSpace();
 
 			bool has_changed = false;
+			
+			present_field(ref has_changed, ref value1, unit1);
+			present_field(ref has_changed, ref value1, unit2, conversion_factor);
 
-			EditorGUI.BeginChangeCheck();
-			value1 = EditorGUILayout.DelayedFloatField(value1, GUILayout.Width(field_width)); //, GUILayout.Width(75f)
-			if (EditorGUI.EndChangeCheck()) {
-				has_changed = true;
-			}
-			EditorGUILayout.LabelField(unit1, GUILayout.Width(unit_width));
-
-			EditorGUI.BeginChangeCheck();
-			float value_converted = EditorGUILayout.DelayedFloatField(value1 * conversion_factor, GUILayout.Width(field_width)); //, GUILayout.Width(75f)
-			if (EditorGUI.EndChangeCheck())
-			{
-				has_changed = true;
-				value1 = value_converted / conversion_factor;
-			}
-			EditorGUILayout.LabelField(unit2, GUILayout.Width(unit_width));
 			EditorGUILayout.EndHorizontal();
 
 			return has_changed;
@@ -372,6 +388,43 @@ namespace hexagonest.Tools
 			update_conversion();
 		}
 
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
+		public bool present_extra(ref bool change_tracker, ref float extra_value, ref bool used_extra_value, string unit1 = "", string unit_extra = "", float extra_conversion = 1f)
+		{
+			bool changed = present_extra(ref extra_value, ref used_extra_value, unit1, unit_extra, extra_conversion);
+			change_tracker |= changed;
+			return changed;
+		}
+
+		// unconverted, converted, and an extra one to spice things up
+		public bool present_extra(ref float extra_value, ref bool used_extra_value, string unit1 = "", string unit_extra = "", float extra_conversion = 1f)
+		{
+			EditorGUILayout.BeginHorizontal();
+			GUILayout.Label(field_name, GUILayout.ExpandWidth(true));
+			GUILayout.FlexibleSpace();
+
+			bool has_changed = false;
+
+			bool changed_normal = UI.present_field(ref has_changed, ref current_value, (unit1 != "") ? unit1 : reference_unit, 1f, UI.field_width_thin, UI.unit_width_thin);
+			changed_normal |= UI.present_field(ref has_changed, ref current_value, "`", current_conversion, UI.field_width_thin, UI.unit_width_thin);
+			if (changed_normal) { extra_value = current_value * extra_conversion; used_extra_value = false; }
+			if (UI.present_dropdown(ref has_changed, ref current_unit_index, ref unit_options, UI.unit_width_thin)) set_unit_from_index(current_unit_index);
+
+			float new_extra = current_value * extra_conversion;
+			if (UI.present_field(ref has_changed, ref new_extra, unit_extra, 1f, UI.field_width_thin, UI.unit_width_thin))
+			{
+				extra_value = new_extra; current_value = new_extra / extra_conversion;
+				used_extra_value = true;
+			}
+			EditorGUILayout.EndHorizontal();
+
+			if (has_changed) update_value(current_value);
+			return has_changed;
+		}
+
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
 		public bool present(ref bool change_tracker, string unit1 = "", float conversion_mod = 1f)
 		{
 			bool changed = present(unit1, conversion_mod);
@@ -379,32 +432,25 @@ namespace hexagonest.Tools
 			return changed;
 		}
 
+		// default present, unconverted and converted fields
 		public bool present(string unit1 = "", float conversion_mod = 1f)
 		{
-			EditorGUILayout.BeginHorizontal(); EditorGUILayout.LabelField(field_name);
+			EditorGUILayout.BeginHorizontal();
+			GUILayout.Label(field_name, GUILayout.ExpandWidth(true));
+			GUILayout.FlexibleSpace();
 
 			bool has_changed = false;
-
-			EditorGUI.BeginChangeCheck();
-			current_value = EditorGUILayout.DelayedFloatField("", current_value, GUILayout.Width(UI.field_width)); //, GUILayout.Width(75f)
-			if (EditorGUI.EndChangeCheck()) { has_changed = true; }
-			EditorGUILayout.LabelField(((unit1 != "") ? unit1 : reference_unit), GUILayout.Width(UI.unit_width));
-
-			EditorGUI.BeginChangeCheck();
-			float value_converted = EditorGUILayout.DelayedFloatField("", converted_value * conversion_mod, GUILayout.Width(UI.field_width)); //, GUILayout.Width(75f)
-			if (EditorGUI.EndChangeCheck()) { has_changed = true; current_value = (value_converted / conversion_mod) / current_conversion; }
-
-			EditorGUI.BeginChangeCheck();
-			int new_selection = EditorGUILayout.Popup(current_unit_index, unit_options, GUILayout.Width(UI.unit_width));
-			if (EditorGUI.EndChangeCheck()) set_unit_from_index(new_selection);
-			//EditorGUILayout.LabelField(current_unit, GUILayout.Width(UI.unit_width));
+			UI.present_field(ref has_changed, ref current_value, (unit1 != "") ? unit1 : reference_unit);
+			UI.present_field(ref has_changed, ref current_value, "`", current_conversion * conversion_mod);
+			if (UI.present_dropdown(ref has_changed, ref current_unit_index, ref unit_options)) set_unit_from_index(current_unit_index);
 			
 			EditorGUILayout.EndHorizontal();
 
 			if (has_changed) update_value(current_value);
 			return has_changed;
 		}
-
+		
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
 		public bool present_one(ref bool change_tracker, string unit1 = "")
 		{
 			bool changed = present_one(unit1);
@@ -412,15 +458,14 @@ namespace hexagonest.Tools
 			return changed;
 		}
 
+		// present unconverted value
 		public bool present_one(string unit1 = "")
 		{
-			EditorGUILayout.BeginHorizontal(); EditorGUILayout.LabelField(field_name);
 			bool has_changed = false;
-
-			EditorGUI.BeginChangeCheck();
-			current_value = EditorGUILayout.DelayedFloatField("", current_value, GUILayout.Width(UI.field_width)); //, GUILayout.Width(75f)
-			if (EditorGUI.EndChangeCheck()) { has_changed = true; }
-			EditorGUILayout.LabelField(((unit1 != "") ? unit1 : reference_unit), GUILayout.Width(UI.unit_width));
+			EditorGUILayout.BeginHorizontal();
+			GUILayout.Label(field_name, GUILayout.ExpandWidth(true));
+			GUILayout.FlexibleSpace();
+			UI.present_field(ref has_changed, ref current_value, (unit1 != "") ? unit1 : reference_unit);
 			EditorGUILayout.EndHorizontal();
 
 			if (has_changed) update_value(current_value);
@@ -448,16 +493,18 @@ namespace hexagonest.Tools
 			pitch = _pitch; roll = _roll; yaw = _yaw; throttle = _throttle; brake = _brake; custom_axis1 = _custom_axis1; gear = _gear;
 		}
 
-		public bool present(bool safe_to_edit = true)
+		public bool present(bool safe_to_edit = true, bool foldable = false)
 		{
 			EditorGUILayout.BeginHorizontal();
-			showing = EditorGUILayout.Foldout(showing, $"Aircraft controls{(!safe_to_edit ? " (unavailable outside of wind tunnel)" : "")}");
+			string label_text = $"Aircraft controls{(!safe_to_edit ? " (unavailable outside of wind tunnel)" : "")}";
+			if (foldable) showing = EditorGUILayout.Foldout(showing, label_text);
+			else EditorGUILayout.LabelField(label_text);
 			GUILayout.FlexibleSpace();
 			EditorGUI.BeginChangeCheck();
-			if (GUILayout.Button("Reset")) { pitch = 0; roll = 0; yaw = 0; throttle = 0; brake = 0; custom_axis1 = 0; }
+			if (GUILayout.Button("Reset")) { pitch = 0; roll = 0; yaw = 0; throttle = 0.5f; brake = 0; custom_axis1 = 0; }
 			EditorGUILayout.EndHorizontal();
 
-			if (showing)
+			if (showing || !foldable)
 			{
 				pitch = EditorGUILayout.Slider("Pitch (+ down)", pitch, -1, 1);
 				roll = EditorGUILayout.Slider("Roll (+ right)", roll, -1, 1);
@@ -465,9 +512,10 @@ namespace hexagonest.Tools
 				throttle = EditorGUILayout.Slider("Throttle", throttle, 0, 1);
 				brake = EditorGUILayout.Slider("Brake", brake, 0, 1);
 				custom_axis1 = EditorGUILayout.Slider("CustomAxis1", custom_axis1, 0, 1);
-				gear = EditorGUILayout.Toggle("Gear", gear);
+				gear = EditorGUILayout.Toggle("Gear (won't actually move)", gear);
 				return EditorGUI.EndChangeCheck();
 			}
+			EditorGUI.EndChangeCheck();
 			return false;
 		}
 	}
@@ -522,7 +570,6 @@ namespace hexagonest.Tools
 			return (T)s_obj.FindProperty(field).boxedValue;
 		}
 
-
 		public static SerializedProperty find_prop(SerializedObject s_obj, string field)
 		{
 			return s_obj.FindProperty(field);
@@ -532,6 +579,11 @@ namespace hexagonest.Tools
 		public static T find_prop_rel<T>(SerializedProperty s_prop, string field)
 		{
 			return (T)s_prop.FindPropertyRelative(field).boxedValue;
+		}
+
+		public static SerializedProperty find_prop_rel(SerializedProperty s_prop, string field)
+		{
+			return s_prop.FindPropertyRelative(field);
 		}
 
 
