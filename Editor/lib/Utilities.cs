@@ -201,13 +201,22 @@ namespace hexagonest.Tools
 		public static float unit_width_thin = 50f;
 
 
+		public static void present_separator(string text = "")
+		{
+			EditorGUILayout.BeginHorizontal();
+			if (text != "")
+			{
+				EditorGUILayout.LabelField("", GUI.skin.horizontalSlider, GUILayout.ExpandWidth(true));
+				GUILayout.Label(text, GUILayout.ExpandWidth(false));
+			}
+			EditorGUILayout.LabelField("", GUI.skin.horizontalSlider, GUILayout.ExpandWidth(true));
+			EditorGUILayout.EndHorizontal();
+		}
+
+
 		// supports passing a reference bool so that change tracking doesn't require an extra statement
 		public static bool present_field(ref bool change_tracker, ref float value, string unit = "", float conversion = 1f, float f_width = 0f, float u_width = 0f)
-		{
-			bool this_changed = present_field(ref value, unit, conversion, f_width, u_width);
-			change_tracker |= this_changed;
-			return this_changed;
-		}
+		{ bool this_changed = present_field(ref value, unit, conversion, f_width, u_width); change_tracker |= this_changed; return this_changed; }
 
 		// generic float field presenter including optional unit and handling conversions automatically
 		// pass "`" as unit to not draw the unit field
@@ -224,11 +233,7 @@ namespace hexagonest.Tools
 
 		// supports passing a reference bool so that change tracking doesn't require an extra statement
 		public static bool present_dropdown(ref bool change_tracker, ref int current_index, ref string[] options, float u_width = 0f)
-		{
-			bool changed = present_dropdown(ref current_index, ref options, u_width);
-			change_tracker |= changed;
-			return changed;
-		}
+		{ bool changed = present_dropdown(ref current_index, ref options, u_width); change_tracker |= changed; return changed; }
 
 		public static bool present_dropdown(ref int current_index, ref string[] options, float u_width = 0f)
 		{
@@ -240,11 +245,7 @@ namespace hexagonest.Tools
 
 		// supports passing a reference bool so that change tracking doesn't require an extra statement
 		public static bool present_one(ref bool change_tracker, string field_name, ref float value, string unit1)
-		{
-			bool changed = present_one(field_name, ref value, unit1);
-			change_tracker |= changed;
-			return changed;
-		}
+		{ bool changed = present_one(field_name, ref value, unit1); change_tracker |= changed; return changed; }
 
 		public static bool present_one(string field_name, ref float value, string unit1)
 		{
@@ -263,11 +264,7 @@ namespace hexagonest.Tools
 
 		// supports passing a reference bool so that change tracking doesn't require an extra statement
 		public static bool present_two(ref bool change_tracker, string field_name, ref float value1, string unit1, ref float value2, string unit2)
-		{
-			bool changed = present_two(field_name, ref value1, unit1, ref value2, unit2);
-			change_tracker |= changed;
-			return changed;
-		}
+		{ bool changed = present_two(field_name, ref value1, unit1, ref value2, unit2); change_tracker |= changed; return changed; }
 
 		public static bool present_two(string field_name, ref float value1, string unit1, ref float value2, string unit2)
 		{
@@ -288,11 +285,7 @@ namespace hexagonest.Tools
 
 		// supports passing a reference bool so that change tracking doesn't require an extra statement
 		public static bool present_one_with_conversion(ref bool change_tracker, string field_name, ref float value1, string unit1, float conversion_factor, string unit2)
-		{
-			bool changed = present_one_with_conversion(field_name, ref value1, unit1, conversion_factor, unit2);
-			change_tracker |= changed;
-			return changed;
-		}
+		{ bool changed = present_one_with_conversion(field_name, ref value1, unit1, conversion_factor, unit2); change_tracker |= changed; return changed; }
 
 		public static bool present_one_with_conversion(string field_name, ref float value1, string unit1, float conversion_factor, string unit2)
 		{
@@ -342,33 +335,202 @@ namespace hexagonest.Tools
 	}
 
 
-	[Serializable] public class ValueWithUnit
+	public abstract class IParameter
 	{
-		public string field_name, unit_type, reference_unit, current_unit;
-		public string[] unit_options, original_unit_options; public int current_unit_index;
-		public float current_value, converted_value, current_conversion;
+		public string field_name;
+		public abstract bool present(ref bool change_tracker);
+		public abstract bool present();
+	}
 
-		public ValueWithUnit(string set_field_name, string set_unit_type, float set_initial_value, string set_reference_unit, string set_current_unit)
+	public abstract class IParameterFixed : IParameter
+	{
+		public float current_value;
+		public virtual void update_value(float new_value) => current_value = new_value;
+	}
+
+	public abstract class IParameterRange : IParameter
+	{
+		public IParameterFixed min, max;
+		public virtual void update_value(float new_min, float new_max)
 		{
-			field_name = set_field_name; unit_type = set_unit_type;
-			reference_unit = set_reference_unit; current_unit = set_current_unit;
+			min.update_value(new_min);
+			max.update_value(new_max);
+			verify_changes();
+		}
+
+		protected virtual void verify_changes()
+		{
+			if (min.current_value > max.current_value) max.update_value(min.current_value + 1);
+			if (max.current_value < min.current_value) min.update_value(max.current_value - 1);
+		}
+	}
+
+
+
+	[Serializable] public class ParameterRange : IParameterRange
+	{
+		public ParameterRange(string _field_name, float _initial_min, float _initial_max)
+		{
+			field_name = _field_name;
+			min = new ParameterFixed(field_name, _initial_min);
+			max = new ParameterFixed(field_name, _initial_max);
+		}
+
+		public override bool present(ref bool change_tracker)
+		{ bool changed = present(); change_tracker |= changed; return changed; }
+
+		public override bool present()
+		{
+			bool has_changed = false;
+			EditorGUILayout.BeginHorizontal();
+			GUILayout.Label(field_name, GUILayout.ExpandWidth(true));
+			GUILayout.FlexibleSpace();
+			UI.present_field(ref has_changed, ref min.current_value, "Min");
+			UI.present_field(ref has_changed, ref max.current_value, "Max");
+			EditorGUILayout.EndHorizontal();
+
+			if (has_changed) verify_changes();
+			return has_changed;
+		}
+	}
+
+
+	// unitless fixed parameter
+	[Serializable] public class ParameterFixed : IParameterFixed
+	{
+		public ParameterFixed(string _field_name, float _initial_value)
+		{
+			field_name = _field_name; current_value = _initial_value;
+		}
+
+		public override bool present(ref bool change_tracker)
+		{ bool changed = present(); change_tracker |= changed; return changed; }
+
+		public override bool present()
+		{
+			bool has_changed = false;
+			EditorGUILayout.BeginHorizontal();
+			GUILayout.Label(field_name, GUILayout.ExpandWidth(true));
+			GUILayout.FlexibleSpace();
+			UI.present_field(ref has_changed, ref current_value, "`");
+			EditorGUILayout.EndHorizontal();
+
+			if (has_changed) update_value(current_value);
+			return has_changed;
+		}
+	}
+
+
+	// parameter range with changeable units
+	[Serializable] public class ParameterRangeUnit : IParameterRange
+	{
+		public string unit_type, reference_unit, current_unit;
+		public ParameterFixedUnit _min, _max;
+		public int current_unit_index;
+
+		public ParameterRangeUnit(string _field_name, string _unit_type, float _initial_min, float _initial_max, string _reference_unit, string _current_unit)
+		{
+			field_name = _field_name; unit_type = _unit_type; reference_unit = _reference_unit; current_unit = _current_unit;
+			_min = new ParameterFixedUnit($"{field_name} (min)", unit_type, _initial_min, reference_unit, current_unit);
+			_max = new ParameterFixedUnit($"{field_name} (max)", unit_type, _initial_max, reference_unit, current_unit);
+
+			min = (IParameterFixed)_min; max = (IParameterFixed)_max;
+			current_unit_index = _min.current_unit_index;
+		}
+
+		protected override void verify_changes()
+		{
+			if (_min.current_value > _max.current_value) _max.update_value(_min.current_value + 1);
+			if (_max.current_value < _min.current_value) _min.update_value(_max.current_value - 1);
+
+			if (_min.current_unit_index != current_unit_index) { _max.set_unit_from_index(_min.current_unit_index); current_unit_index = _min.current_unit_index; }
+			if (_max.current_unit_index != current_unit_index) { _min.set_unit_from_index(_max.current_unit_index); current_unit_index = _max.current_unit_index; }
+		}
+
+		// default (change tracking) presenter
+		public override bool present(ref bool change_tracker)
+		{ bool changed = present(); change_tracker |= changed; return changed; }
+
+		// default presenter
+		public override bool present()
+		{
+			return present_two();
+		}
+
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
+		public bool present_extra(ref bool change_tracker, ref bool used_extra_value, string unit1 = "", string unit_extra = "", float _extra_conversion = 1f)
+		{ bool changed = present_extra(ref used_extra_value, unit1, unit_extra, _extra_conversion); change_tracker |= changed; return changed; }
+
+		public bool present_extra(ref bool used_extra_value, string unit1 = "", string unit_extra = "", float _extra_conversion = 1f)
+		{
+			bool changed = false;
+			_min.present_extra(ref changed, ref used_extra_value, unit1, unit_extra, _extra_conversion);
+			_max.present_extra(ref changed, ref used_extra_value, unit1, unit_extra, _extra_conversion);
+
+			if (changed) verify_changes();
+			return changed;
+		}
+
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
+		public bool present_two(ref bool change_tracker, string unit1 = "", float conversion_mod = 1f)
+		{ bool changed = present_two(unit1, conversion_mod); change_tracker |= changed; return changed; }
+
+		public bool present_two(string unit1 = "", float conversion_mod = 1f)
+		{
+			bool changed = false;
+			_min.present_two(ref changed, unit1, conversion_mod);
+			_max.present_two(ref changed, unit1, conversion_mod);
+
+			if (changed) verify_changes();
+			return changed;
+		}
+
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
+		public bool present_one(ref bool change_tracker, string unit1 = "")
+		{ bool changed = present_one(unit1); change_tracker |= changed; return changed; }
+
+		public bool present_one(string unit1 = "")
+		{
+			bool changed = false;
+			_min.present_one(ref changed, unit1);
+			_max.present_one(ref changed, unit1);
+
+			if (changed) verify_changes();
+			return changed;
+		}
+	}
+
+
+	// fixed parameter with changeable units
+	[Serializable] public class ParameterFixedUnit : IParameterFixed
+	{
+		public string unit_type, reference_unit, current_unit;
+		public string[] unit_options, original_unit_options; public int current_unit_index;
+		public float converted_value, current_conversion, extra_value, extra_conversion;
+
+		public ParameterFixedUnit(string _field_name, string _unit_type, float _initial_value, string _reference_unit, string _current_unit)
+		{
+			field_name = _field_name; unit_type = _unit_type; reference_unit = _reference_unit; current_unit = _current_unit;
 			original_unit_options = Units.key_names[unit_type];
 			// replace slashes with a similar looking character so the unit selection popup doesn't spawn submenus for no reason
 			unit_options = original_unit_options.Select(option => option.Replace('/', '\u2044')).ToArray();
-			set_unit_from_name(set_current_unit);
-			current_value = set_initial_value; update_conversion();
+			set_unit_from_name(_current_unit);
+			current_value = _initial_value; update_conversion();
+			extra_value = _initial_value; extra_conversion = 1f;
 		}
 
-		public float update_conversion()
+		public void update_conversion()
 		{
 			current_conversion = Units.conversions[unit_type][current_unit];
-			return update_value(current_value);
+			update_value(current_value);
 		}
 
-		public float update_value(float new_value)
+		public override void update_value(float new_value)
 		{
 			current_value = new_value; converted_value = new_value * current_conversion;
-			return converted_value;
 		}
 
 		public void set_unit_from_name(string new_unit)
@@ -389,20 +551,29 @@ namespace hexagonest.Tools
 		}
 
 
-		// supports passing a reference bool so that change tracking doesn't require an extra statement
-		public bool present_extra(ref bool change_tracker, ref float extra_value, ref bool used_extra_value, string unit1 = "", string unit_extra = "", float extra_conversion = 1f)
+		// default (change tracking) presenter
+		public override bool present(ref bool change_tracker)
+		{ bool changed = present(); change_tracker |= changed; return changed; }
+
+		// default presenter
+		public override bool present()
 		{
-			bool changed = present_extra(ref extra_value, ref used_extra_value, unit1, unit_extra, extra_conversion);
-			change_tracker |= changed;
-			return changed;
+			return present_two();
 		}
 
+
+		// supports passing a reference bool so that change tracking doesn't require an extra statement
+		public bool present_extra(ref bool change_tracker, ref bool used_extra_value, string unit1 = "", string unit_extra = "", float _extra_conversion = 1f)
+		{ bool changed = present_extra(ref used_extra_value, unit1, unit_extra, _extra_conversion); change_tracker |= changed; return changed; }
+
 		// unconverted, converted, and an extra one to spice things up
-		public bool present_extra(ref float extra_value, ref bool used_extra_value, string unit1 = "", string unit_extra = "", float extra_conversion = 1f)
+		public bool present_extra(ref bool used_extra_value, string unit1 = "", string unit_extra = "", float _extra_conversion = 1f)
 		{
 			EditorGUILayout.BeginHorizontal();
 			GUILayout.Label(field_name, GUILayout.ExpandWidth(true));
 			GUILayout.FlexibleSpace();
+
+			extra_conversion = _extra_conversion; // replace previous
 
 			bool has_changed = false;
 
@@ -425,15 +596,11 @@ namespace hexagonest.Tools
 
 
 		// supports passing a reference bool so that change tracking doesn't require an extra statement
-		public bool present(ref bool change_tracker, string unit1 = "", float conversion_mod = 1f)
-		{
-			bool changed = present(unit1, conversion_mod);
-			change_tracker |= changed;
-			return changed;
-		}
+		public bool present_two(ref bool change_tracker, string unit1 = "", float conversion_mod = 1f)
+		{ bool changed = present_two(unit1, conversion_mod); change_tracker |= changed; return changed; }
 
 		// default present, unconverted and converted fields
-		public bool present(string unit1 = "", float conversion_mod = 1f)
+		public bool present_two(string unit1 = "", float conversion_mod = 1f)
 		{
 			EditorGUILayout.BeginHorizontal();
 			GUILayout.Label(field_name, GUILayout.ExpandWidth(true));
@@ -450,13 +617,10 @@ namespace hexagonest.Tools
 			return has_changed;
 		}
 		
+
 		// supports passing a reference bool so that change tracking doesn't require an extra statement
 		public bool present_one(ref bool change_tracker, string unit1 = "")
-		{
-			bool changed = present_one(unit1);
-			change_tracker |= changed;
-			return changed;
-		}
+		{ bool changed = present_one(unit1); change_tracker |= changed; return changed; }
 
 		// present unconverted value
 		public bool present_one(string unit1 = "")
@@ -512,7 +676,7 @@ namespace hexagonest.Tools
 				throttle = EditorGUILayout.Slider("Throttle", throttle, 0, 1);
 				brake = EditorGUILayout.Slider("Brake", brake, 0, 1);
 				custom_axis1 = EditorGUILayout.Slider("CustomAxis1", custom_axis1, 0, 1);
-				gear = EditorGUILayout.Toggle("Gear (won't actually move)", gear);
+				gear = EditorGUILayout.Toggle("Gear (not animated)", gear);
 				return EditorGUI.EndChangeCheck();
 			}
 			EditorGUI.EndChangeCheck();

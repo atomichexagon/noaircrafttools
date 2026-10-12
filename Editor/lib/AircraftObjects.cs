@@ -32,7 +32,7 @@ namespace hexagonest.Tools
 		}
 
 		// from params (also in degrees)
-		public AircraftState(ValueWithUnit _airspeed, ValueWithUnit _altitude, float _alpha, float _beta)
+		public AircraftState(ParameterFixedUnit _airspeed, ParameterFixedUnit _altitude, float _alpha, float _beta)
 			: this(_airspeed.current_value, _altitude.current_value, _alpha, _beta) {}
 	}
 
@@ -308,13 +308,16 @@ namespace hexagonest.Tools
 			var s_device = new SerializedObject(device_comp);
 			device_transform = device_comp.gameObject.transform;
 
-			attached_part = parent_aircraft.part_lookup[find_prop<Component>(s_device, "aeroPart")];
 			speed_deploy = find_prop<float>(s_device, "speedDeployed");
 			speed_retract = find_prop<float>(s_device, "speedRetracted");
 			alpha_min = find_prop<float>(s_device, "alphaMin");
 			alpha_factor = find_prop<float>(s_device, "alphaFactor");
 			deployed_area = find_prop<float>(s_device, "deployedArea");
 			var s_moving_parts = find_prop(s_device, "movingParts");
+
+			attached_part = parent_aircraft.part_lookup[find_prop<Component>(s_device, "aeroPart")];
+			part_area_retracted = attached_part.original_physics.wing_area;
+			part_area_deployed = part_area_retracted + deployed_area;
 
 			moving_parts = new MovingPart[s_moving_parts.arraySize];
 			for (int j = 0; j < s_moving_parts.arraySize; j++) {
@@ -359,6 +362,7 @@ namespace hexagonest.Tools
 					changed = true;
 				}
 			}
+			//if (changed) Debug.Log($"Flap {device_transform.gameObject} updated");
 			return changed;
 		}
 
@@ -465,6 +469,7 @@ namespace hexagonest.Tools
 
 			bool changed = (last_angle != main_angle) || (last_split != split_amount);
 			last_angle = main_angle; last_split = split_amount;
+			//if (changed) Debug.Log($"Surface {visible_mesh} updated");
 			return changed;
 		}
 
