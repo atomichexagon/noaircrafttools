@@ -586,7 +586,6 @@ namespace hexagonest.Tools
 				};
 
 				// rebuild to accomodate state changes
-				Debug.Log($"{s_alpha}, {s_beta}, {s_vel}, {s_alt}");
 				sim_params = new AircraftState(s_vel, s_alt, s_alpha, s_beta);
 
 				switch (current_mode.sim_type)
