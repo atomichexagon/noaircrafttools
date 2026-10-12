@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using System;
 
 using static hexagonest.Tools.Utilities;
 
@@ -75,22 +76,108 @@ namespace hexagonest.Tools
 		public struct SimResults { public Vector3 total, lift, drag, torque; public SimForces forces; }
 
 
-		public static Vector3 velocity_vector(float v, float alpha, float beta)
+		public static Vector3 velocity_vector(float alpha, float beta)
 		{
-			return new Vector3(Mathf.Sin(beta), -Mathf.Sin(alpha), Mathf.Cos(alpha)).normalized * v;
+			return new Vector3(Mathf.Sin(beta), -Mathf.Sin(alpha), Mathf.Cos(alpha)).normalized;
 		}
 
 
+		// general purpose bisection solver that tries to find zero with the given evaluator
+		public static float bisection_solver(float min, float max, int scan_steps, int bisect_steps, float tolerance, Func<float, float> evaluate)
+		{
+			float a = -1f, c = float.NaN;
+			float t_a = evaluate(a);
+			float t_c = 0f;
+
+			float best_x = a, best_value = Mathf.Abs(t_a);
+
+			// start by refining [a,c] a bit
+			float range = max - min;
+			for (int j = 1; j < scan_steps + 1; j++)
+			{
+				float x = min + (range * j / scan_steps);
+				float t_x = evaluate(x);
+				if (Mathf.Abs(t_x) < best_value) { best_x = x; best_value = Mathf.Abs(t_x); }
+				if (t_a * t_x <= 0f) { c = x; t_c = t_x; break; }
+				a = x; t_a = t_x;
+			}
+
+			if (!float.IsNaN(c)) {
+				// straightforward bisection, calculate torque at a, then at midpoint
+				// if it crosses zero, we overshot, refine the range to (a, b) and go again
+				// if it doesn't cross zero, undershot, refine the range to (b, c) and go again
+				for (int j = 0; j < bisect_steps; j++)
+				{
+					float b = (a + c) / 2f;
+					float t_b = evaluate(b);
+					if (Mathf.Abs(t_b) < tolerance) break; // that's probably close enough
+
+					if ((t_a * t_b) <= 0f) c = b; // crossed zero, root between a,b
+					else { a = b; t_a = t_b; }  // didn't cross zero, root between b,c
+				}
+				best_x = (a + c) / 2f;
+			}
+			return best_x;
+		}
+
+
+		public static float find_pitch_trim(AircraftData aircraft, AircraftState state, ControlInputs controls, int scan_steps = 5, int bisect_steps = 20)
+		{
+			return bisection_solver(-1f, 1f, scan_steps, bisect_steps, 1f, x => update_and_simulate(aircraft, state, controls.set_pitch(x)).torque.x);
+		}
+
+
+		public static (float alpha, float trim) find_level_flight_alpha(AircraftData aircraft, AircraftState state, ControlInputs controls,
+			int scan_steps = 5, int bisect_steps = 20)
+		{
+			float aircraft_weight = aircraft.physics.current_mass * Constants.G;
+			float last_trim = controls.pitch;
+			Func<float, float> evaluator = (alpha) => {
+				state.alpha = alpha * Mathf.Deg2Rad;
+				float trim = find_pitch_trim(aircraft, state, controls);
+				controls.set_pitch(trim); last_trim = trim;
+
+				// TODO: rotate forces - results are going to be in aircraft's reference frame
+				// (i'd do it now but it's 5am)
+				SimResults results = aircraft_forces(aircraft, state);
+				// using total allows for thrust to automatically be considered
+				return results.total.y - aircraft_weight;
+			};
+
+			return (bisection_solver(-10f, 30f, scan_steps, bisect_steps, 10f, evaluator), last_trim);
+		}
+
+
+		public static SimResults update_and_simulate(AircraftData aircraft, AircraftState state, ControlInputs controls)
+		{
+			aircraft.update(state, controls);
+			return Simulation.aircraft_forces(aircraft, state);
+		}
+
+		
+		// idk convenience i guess
 		// v - airspeed (m/s)
 		// h - altitude (meters)
 		// alpha - pitch angle of attack, + nose up
 		// beta - yaw angle of attack, + nose left (!)
 		// log_spam - guess (please god do not enable this when sweeping)
 		public static SimResults aircraft_forces(AircraftData aircraft, float v, float h, float alpha, float beta, bool log_spam = false)
+		{ return aircraft_forces(aircraft, new AircraftState(v, h, alpha, beta), log_spam); }
+
+
+		// resettable simulation counter
+		public static int num_simulations = 0;
+
+		// aircraft - guess
+		// state - sim environment
+		// log_spam - guess (please god do not enable this when sweeping)
+		public static SimResults aircraft_forces(AircraftData aircraft, AircraftState state, bool log_spam = false)
 		{
-			(float rho, float mach) = isa_atm(h);
-			Vector3 v_dir = new Vector3(Mathf.Sin(beta), -Mathf.Sin(alpha), Mathf.Cos(alpha)).normalized;
-			Vector3 vel = v * v_dir;
+			num_simulations += 1;
+			(float rho, float mach) = isa_atm(state.altitude);
+			float v = state.airspeed, alpha = state.alpha, beta = state.beta;
+			Vector3 v_dir = state.v_dir;
+			Vector3 vel = state.velocity;
 			float airspeed_sq = v * v;
 
 			AircraftPhysics physics = aircraft.physics;
@@ -202,18 +289,6 @@ namespace hexagonest.Tools
 					forces.add(part_cg, force_total, force_lift, force_drag, part_torque);
 				}
 			}
-
-			// handle control surface split drag
-			// foreach (ControlSurface surface in aircraft.control_surfaces)
-			// {
-			// 	if (surface.split_amount == 0) continue;
-			// 	Vector3 force_drag = v_dir * (-1f * surface.split_amount * surface.split_drag * rho * airspeed_sq);
-
-			// 	sum_total += force_drag; sum_drag += force_drag;
-			// 	Vector3 part_arm = surface.attached_part.world_cg - aircraft_cg;
-			// 	Vector3 this_part_torque = Vector3.Cross(part_arm, force_drag);
-			// 	sum_torque += this_part_torque;
-			// }
 
 			return new SimResults { total = sum_total, lift = sum_lift, drag = sum_drag, torque = sum_torque, forces = forces };
 		}

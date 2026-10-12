@@ -70,15 +70,16 @@ namespace hexagonest.Tools
 		// TODO: show descriptions somewhere
 		static WindTunnelMode[] modes_available = new WindTunnelMode[] {
 			new WindTunnelMode ( "force_sweep", "Forces",
-				"Sweeps alpha angles, fixed airspeed/altitude/beta. Calculates forces, L/D ratio, and aerodynamic moments.",
+				"Evaluates forces on the aircraft through the selected sweep range.",
 				true, new string[] { "airspeed", "altitude", "alpha", "beta" }, new string[] { "alpha", "beta", "airspeed" }
 			),
 			new WindTunnelMode ( "trim_sweep", "Trim finder",
-				"Sweeps alpha angles and finds zero-moment elevator input, fixed airspeed/altitude/beta. Calculates forces, L/D ratio, and aerodynamic moments.",
-				true, new string[] { "airspeed", "altitude", "alpha", "beta" }, new string[] { "alpha", "airspeed" }
+				"In alpha sweep mode, finds the trim setting where pitch torque is zero."
+				+ "\nIn airspeed sweep mode, finds the required alpha to maintain 1G, and then finds the trim setting to zero out pitch torque.",
+				true, new string[] { "airspeed", "altitude", "beta" }, new string[] { "alpha", "airspeed" }
 			),
 			new WindTunnelMode ( "deflection_sweep", "Control authority",
-				"Sweeps pitch control range, fixed airspeed/altitude/alpha/beta. Calculates forces, L/D ratio, and aerodynamic moments.",
+				"Evaluates forces on the aircraft across the selected control's full range.",
 				true, new string[] { "airspeed", "altitude", "alpha", "beta" }, new string[] { "pitch", "roll", "yaw" }
 			),
 		};
@@ -133,6 +134,7 @@ namespace hexagonest.Tools
 
 		// display
 		static List<graph_series> simulation_series = new List<graph_series>();
+		static Dictionary<string, bool> series_visible = new Dictionary<string, bool>();
 		static bool has_simulation_data = false;
 		//static bool graph_updated = false;
 
@@ -141,6 +143,8 @@ namespace hexagonest.Tools
 		// status shenanigans
 		static string last_simenv_status = "";
 		static bool tunnel_collision_check = false;
+		static float last_sim_time = -1f;
+		static int last_sim_count = 0;
 
 		void OnEnable()
 		{
@@ -418,41 +422,15 @@ namespace hexagonest.Tools
 				current_mode.sweep_param = current_mode.sweep_params[current_mode.current_sweep];
 			}
 
-			//(float rho, float mach) = Simulation.isa_atm(altitude_fixed.current_value);
-
+			// Sweep param
 			if (p_sweep.ContainsKey(current_mode.sweep_param))
 				p_sweep[current_mode.sweep_param].present(ref params_changed);
 
-
-			//UI.present_separator("Fixed");
+			// Fixed params
 			foreach (string parameter in show_params)
 			{
 				if (current_mode.sweep_param != parameter) p_fixed[parameter].present(ref params_changed);
 			}
-
-			// if (show_params.Contains("airspeed_fixed"))
-			// 	airspeed_fixed.present_extra(ref params_changed, ref using_mach, "", "M", 1f/mach);
-			// if (show_params.Contains("airspeed_range"))
-			// 	airspeed_range.present_extra(ref params_changed, ref using_mach, "", "M", 1f / mach);
-
-			// if (show_params.Contains("altitude_fixed"))
-			// {
-			// 	if (altitude_fixed.present(ref params_changed) && using_mach)
-			// 	{
-			// 		var atmos = Simulation.isa_atm(altitude_fixed.current_value);
-			// 		if (show_params.Contains("airspeed_fixed"))
-			// 			airspeed_fixed.update_value(airspeed_fixed.extra_value * atmos.mach);
-			// 		if (show_params.Contains("airspeed_range"))
-			// 			airspeed_range.update_value(airspeed_range.min.extra_value * atmos.mach, airspeed_range.max.extra_value * atmos.mach);
-			// 	}
-			// }
-			// if (show_params.Contains("altitude_range")) altitude_range.present(ref params_changed);
-
-			// if (show_params.Contains("alpha_range")) UI.present_two(ref params_changed, "Alpha range", ref alpha_min, "° min", ref alpha_max, "° max");
-			// if (show_params.Contains("beta_range")) UI.present_two(ref params_changed, "Beta range", ref beta_min, "° min", ref beta_max, "° max");
-
-			// if (show_params.Contains("alpha_fixed")) UI.present_one(ref params_changed, "Fixed alpha", ref alpha_fixed, "°");
-			// if (show_params.Contains("beta_fixed")) UI.present_one(ref params_changed, "Fixed beta", ref beta_fixed, "°");
 
 			EditorGUI.BeginChangeCheck();
 			simulation_steps = EditorGUILayout.IntSlider("Steps", simulation_steps, 5, 500);
@@ -493,6 +471,8 @@ namespace hexagonest.Tools
 			GUILayout.Label(last_simenv_status, "ToolbarLabel");
 			GUILayout.FlexibleSpace();
 			GUILayout.Label(in_wind_tunnel ? "In wind tunnel" : "In prefab", "ToolbarLabel");
+			if (last_sim_time != -1f)
+				GUILayout.Label($"Last simulation: {Math.Round(last_sim_time * 1000, 2)}ms ({last_sim_count} steps)", "ToolbarLabel");
 			EditorGUILayout.EndHorizontal();
 
 			update_results();
@@ -517,6 +497,8 @@ namespace hexagonest.Tools
 			//find_aircraft();
 			if (current_aircraft == null) { Debug.LogError("No aircraft selected, or no prefab available"); return; }
 
+			simulation_series.ForEach(series => series_visible[series.name] = series.visible);
+
 			List<graph_series> new_series = new List<graph_series>();
 
 			// default visualizations, will only be displayed if the current mode populates them
@@ -532,10 +514,12 @@ namespace hexagonest.Tools
 
 			// mode-specific
 			graph_series trim_series = new graph_series { name = "Trim", color = new Color(0.8f, 0.4f, 1.0f) };
+			// reused as the pitch angle line for trim_sweep's airspeed sweep
+			graph_series one_g_series = new graph_series { name = "1G", color = Color.white, };
 
 			new_series.AddRange(new[] {
 				lift_series, clift_series, drag_series, cdrag_series, ld_series,
-				t_pitch_series, t_yaw_series, t_roll_series
+				t_pitch_series, t_yaw_series, t_roll_series, trim_series, one_g_series
 			});
 
 			// initial values
@@ -560,6 +544,8 @@ namespace hexagonest.Tools
 				sweep_min = -1; sweep_max = 1; // pitch/roll/yaw (or the range isn't set up right)
 			}
 
+			float simulation_began = Time.realtimeSinceStartup;
+			Simulation.num_simulations = 0;
 			for (int i = 0; i < simulation_steps; i++)
 			{
 				float sweep_value = sweep_min + (i * ((sweep_max - sweep_min) / (simulation_steps - 1)));
@@ -591,45 +577,17 @@ namespace hexagonest.Tools
 				switch (current_mode.sim_type)
 				{
 					case "trim_sweep":
-						float a = -1f, c = float.NaN;
-						current_aircraft.update(sim_params, new ControlInputs { throttle = 0.5f, pitch = a });
-						float t_a = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad).torque.x;
-						float t_c = 0f;
-
-						float best_trim = a, best_torque = Mathf.Abs(t_a);
-
-						// start by refining [a,c] a bit
-						const int steps = 5;
-						for (int j = 1; j < steps + 1; j++)
+						float final_trim;
+						if (sweep_param == "alpha")
 						{
-							float x = -1f + (2f * j / steps);
-							current_aircraft.update(sim_params, new ControlInputs { throttle = 0.5f, pitch = x });
-							float t_x = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad).torque.x;
-							if (Mathf.Abs(t_x) < best_torque) { best_trim = x; best_torque = Mathf.Abs(t_x); }
-							if (t_a * t_x <= 0f) { c = x; t_c = t_x; break; }
-							a = x; t_a = t_x;
+							final_trim = Simulation.find_pitch_trim(current_aircraft, sim_params, input_panel.inputs_obj);
+						} else {
+							(float level_alpha, float trim) = Simulation.find_level_flight_alpha(current_aircraft, sim_params, input_panel.inputs_obj);
+							final_trim = trim;
+							sim_params.alpha = level_alpha * Mathf.Deg2Rad;
+							one_g_series.Add(new Vector2(result_index, level_alpha));
 						}
-
-						float final_trim = best_trim;
-						if (!float.IsNaN(c)) {
-							// straightforward bisection, calculate torque at a, then at midpoint
-							// if it crosses zero, we overshot, refine the range to (a, b) and go again
-							// if it doesn't cross zero, undershot, refine the range to (b, c) and go again
-							for (int j = 0; j < 30; j++)
-							{
-								float b = (a + c) / 2f;
-								current_aircraft.update(sim_params, new ControlInputs { throttle = 0.5f, pitch = b });
-								float t_b = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad).torque.x;
-								if (Mathf.Abs(t_b) < 1f) break; // that's probably close enough
-
-								if ((t_a * t_b) <= 0f) c = b; // crossed zero, root between a,b
-								else { a = b; t_a = t_b; }  // didn't cross zero, root between b,c
-							}
-							final_trim = (a + c) / 2f;
-						}
-
-						current_aircraft.update(sim_params, new ControlInputs { throttle = 0.5f, pitch = final_trim });
-						results = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad);
+						results = Simulation.update_and_simulate(current_aircraft, sim_params, input_panel.inputs_obj.set_pitch(final_trim));
 
 						trim_series.Add(new Vector2(result_index, final_trim));
 						break;
@@ -652,10 +610,13 @@ namespace hexagonest.Tools
 
 				float dyn_pres = 0.5f * Simulation.isa_atm(s_alt).rho * (s_vel * s_vel);
 				//Debug.Log($"Lift: {total_lift}, dyn pres: {dyn_pres}, wing area: {current_aircraft.physics.wing_area}");
-				clift_series.Add(new Vector2(result_index, total_lift / (dyn_pres * current_aircraft.physics.wing_area)));
-				cdrag_series.Add(new Vector2(result_index, total_drag / (dyn_pres * total_area)));
+				float cl = total_lift / (dyn_pres * current_aircraft.physics.wing_area);
+				float cd = total_drag / (dyn_pres * total_area);
 
-				float lift_drag_ratio = total_lift / total_drag;
+				clift_series.Add(new Vector2(result_index, cl));
+				cdrag_series.Add(new Vector2(result_index, cd));
+
+				float lift_drag_ratio = cl / cd; // total_lift / total_drag;
 
 				// todo: figure out a good way for modes to add their own series outputs + choosing which of these to include
 				lift_series.Add(new Vector2(result_index, total_lift));
@@ -667,17 +628,18 @@ namespace hexagonest.Tools
 
 				min_index = Mathf.Min(min_index, result_index); max_index = Mathf.Max(max_index, result_index);
 			}
+			float simulation_ended = Time.realtimeSinceStartup;
+			last_sim_time = simulation_ended - simulation_began;
+			last_sim_count = Simulation.num_simulations;
 
-			Dictionary<string, bool> was_visible = simulation_series.ToDictionary(entry => entry.name, entry => entry.visible);
-
-			float one_g_force = current_aircraft.physics.current_mass * Constants.G;
-			graph_series one_g_line = new graph_series {
-				name = "1G",
-				color = Color.white,
-				points = new Vector2[2]{ new Vector2(min_index, one_g_force), new Vector2(max_index, one_g_force) },
-				visible = was_visible.ContainsKey("1G") ? was_visible["1G"] : true
-			};
-			new_series.Add(one_g_line);
+			// float one_g_force = current_aircraft.physics.current_mass * Constants.G;
+			// graph_series one_g_line = new graph_series {
+			// 	name = "1G",
+			// 	color = Color.white,
+			// 	points = new Vector2[2]{ new Vector2(min_index, one_g_force), new Vector2(max_index, one_g_force) },
+			// 	visible = was_visible.ContainsKey("1G") ? was_visible["1G"] : true
+			// };
+			// new_series.Add(one_g_line);
 
 			// modify series before presentation
 			switch(current_mode.sim_type)
@@ -685,9 +647,8 @@ namespace hexagonest.Tools
 				case "trim_sweep":
 					new_series.Remove(lift_series);
 					new_series.Remove(drag_series);
-					new_series.Add(trim_series);
-					float wing_pressure = current_aircraft.physics.wing_area * 0.5f * Simulation.isa_atm(s_alt).rho * (s_vel * s_vel);
-					one_g_line.points = one_g_line.points.Select(point => new Vector2(point.x, point.y / wing_pressure)).ToArray();
+					//float wing_pressure = current_aircraft.physics.wing_area * 0.5f * Simulation.isa_atm(s_alt).rho * (s_vel * s_vel);
+					//one_g_line.points = one_g_line.points.Select(point => new Vector2(point.x, point.y / wing_pressure)).ToArray();
 					//one_g_line.name = "1G CL";
 					// reset aircraft to original configured state
 					current_aircraft.update(current_params, input_panel.inputs_obj, 100f);
@@ -695,7 +656,7 @@ namespace hexagonest.Tools
 				case "deflection_sweep":
 					new_series.Remove(lift_series);
 					new_series.Remove(drag_series);
-					new_series.Remove(one_g_line);
+					new_series.Remove(one_g_series);
 					// reset aircraft to original configured state
 					current_aircraft.update(current_params, input_panel.inputs_obj, 100f);
 					break;
@@ -707,7 +668,7 @@ namespace hexagonest.Tools
 
 			List<graph_series> series_compiled = new_series.Where(entry => (entry._points.Count > 0 || entry.points.Length > 0)).Select(entry => {
 				entry.finish();
-				entry.visible = was_visible.ContainsKey(entry.name) ? was_visible[entry.name] : true;
+				entry.visible = series_visible.ContainsKey(entry.name) ? series_visible[entry.name] : true;
 				return entry;
 			}).ToList();
 

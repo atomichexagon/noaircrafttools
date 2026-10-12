@@ -15,20 +15,31 @@ namespace hexagonest.Tools
 		public float pitch = 0, roll = 0, yaw = 0, throttle = 0, brake = 0, custom_axis1 = 0;
 		public bool gear = false; // blow my head off
 		// TODO: simulate gear drag?
+
+		// helper
+		private ControlInputs set(Action<ControlInputs> action) { action(this); return this; }
+
+		// convenient modification methods
+		public ControlInputs set_pitch(float new_pitch) => set(inputs => inputs.pitch = new_pitch);
+		public ControlInputs set_roll(float new_roll) => set(inputs => inputs.roll = new_roll);
+		public ControlInputs set_yaw(float new_yaw) => set(inputs => inputs.yaw = new_yaw);
+		public ControlInputs set_throttle(float new_throttle) => set(inputs => inputs.throttle = new_throttle);
+		public ControlInputs set_brake(float new_brake) => set(inputs => inputs.brake = new_brake);
+		public ControlInputs set_axis1(float new_axis1) => set(inputs => inputs.custom_axis1 = new_axis1);
 	}
 
 	// for objects wearing a context hat
 	[Serializable] public class AircraftState
 	{
 		public float airspeed = 100f, altitude = 50f, alpha = 0f, beta = 0f; // NOT in degrees!
-		public Vector3 velocity = new Vector3(0f, 0f, 50f);
+		public Vector3 v_dir { get => Simulation.velocity_vector(alpha, beta); }
+		public Vector3 velocity { get => v_dir * airspeed; }
 
 		// from numbers (in degrees)
 		public AircraftState(float _airspeed, float _altitude, float _alpha, float _beta)
 		{
 			airspeed = _airspeed; altitude = _altitude;
 			alpha = _alpha * Mathf.Deg2Rad; beta = _beta * Mathf.Deg2Rad;
-			velocity = Simulation.velocity_vector(_airspeed, alpha * Mathf.Deg2Rad, beta * Mathf.Deg2Rad);
 		}
 
 		// from params (also in degrees)
