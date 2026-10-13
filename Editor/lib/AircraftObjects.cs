@@ -17,7 +17,7 @@ namespace hexagonest.Tools
 		// TODO: simulate gear drag?
 
 		// helper
-		private ControlInputs set(Action<ControlInputs> action) { action(this); return this; }
+		public ControlInputs set(Action<ControlInputs> action) { action(this); return this; }
 
 		// convenient modification methods
 		public ControlInputs set_pitch(float new_pitch) => set(inputs => inputs.pitch = new_pitch);
@@ -45,6 +45,8 @@ namespace hexagonest.Tools
 		// from params (also in degrees)
 		public AircraftState(ParameterFixedUnit _airspeed, ParameterFixedUnit _altitude, float _alpha, float _beta)
 			: this(_airspeed.current_value, _altitude.current_value, _alpha, _beta) {}
+
+		public AircraftState set(Action<AircraftState> action) { action(this); return this; }
 	}
 
 	// to simplify aircraft update logic
@@ -525,22 +527,7 @@ namespace hexagonest.Tools
 			{
 				world_cg = ((Transform)cg_transform).position;
 			} else {
-				// TODO: Make this a utility function to find the CG of an arbitrary GameObject with a collider.
-				MeshCollider part_col = go.GetComponent<MeshCollider>();
-				if (part_col != null && part_col.sharedMesh != null)
-				{
-					// using a placeholder GameObject, giving it the same mesh, a collider, and a rigidbody
-					// to find the rigidbody's center of mass, since that's what the game uses
-					GameObject probe = new GameObject("ColliderProbe");
-					probe.transform.SetPositionAndRotation(transform.position, transform.rotation);
-					MeshCollider probe_col = probe.AddComponent<MeshCollider>();
-					probe_col.sharedMesh = part_col.sharedMesh; probe_col.convex = true;
-					Rigidbody probe_rb = probe.AddComponent<Rigidbody>();
-					Physics.SyncTransforms();
-					probe_rb.ResetCenterOfMass();
-					world_cg = probe_rb.worldCenterOfMass;
-					UnityEngine.Object.DestroyImmediate(probe);
-				}
+				world_cg = find_object_cg(go);
 			}
 			mass = find_prop<float>(aero_part, "mass");
 			float dry_mass = mass, fuel_mass = 0;

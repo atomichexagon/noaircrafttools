@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using UnityEditor;
+using UnityEditorInternal;
 using UnityEditor.SceneManagement;
 
 using static hexagonest.Tools.Utilities;
@@ -725,6 +726,48 @@ namespace hexagonest.Tools
 				return (running_total / sum, sum);
 			}
 		}
+
+
+		public static Vector3 find_object_cg(GameObject go)
+		{
+			Collider[] colliders = go.GetComponents<Collider>();
+
+			GameObject probe = new GameObject("ColliderProbe") { hideFlags = HideFlags.HideAndDontSave };
+			probe.transform.SetPositionAndRotation(go.transform.position, go.transform.rotation);
+
+			try
+			{
+				foreach (var collider in colliders)
+				{
+					if (!collider.enabled) continue;
+					var holder = new GameObject("subprobe") {hideFlags = HideFlags.HideAndDontSave};
+					holder.transform.SetParent(probe.transform, false);
+					holder.transform.SetPositionAndRotation(collider.transform.position, collider.transform.rotation);
+					holder.transform.localScale = collider.transform.lossyScale;
+
+					switch (collider)
+					{
+						case BoxCollider b:
+							var nb = holder.AddComponent<BoxCollider>(); nb.center = b.center; nb.size = b.size; break;
+						case SphereCollider s:
+							var ns = holder.AddComponent<SphereCollider>(); ns.center = s.center; ns.radius = s.radius; break;
+						case CapsuleCollider c:
+							var nc = holder.AddComponent<CapsuleCollider>(); nc.center = c.center; nc.radius = c.radius;
+							nc.height = c.height; nc.direction = c.direction; break;
+						case MeshCollider m when m.sharedMesh != null:
+							var nm = holder.AddComponent<MeshCollider>(); nm.sharedMesh = m.sharedMesh; nm.convex = true; break;
+						default: continue;
+					}
+				}
+
+				var probe_rb = probe.AddComponent<Rigidbody>();
+				Physics.SyncTransforms();
+				probe_rb.ResetCenterOfMass();
+				return probe_rb.worldCenterOfMass;
+			}
+			finally { UnityEngine.Object.DestroyImmediate(probe); }
+		}
+
 
 		public static Type game_type(string class_name) => Assembly.Load("Assembly-CSharp").GetType(class_name);
 
