@@ -82,6 +82,14 @@ namespace hexagonest.Tools
 				"Evaluates forces on the aircraft across the selected control's full range.",
 				true, new string[] { "airspeed", "altitude", "alpha", "beta" }, new string[] { "pitch", "roll", "yaw" }
 			),
+			new WindTunnelMode ( "stability_index", "Stability index",
+				"Evaluates stability index across alpha range",
+				true, new string[] { "airspeed", "altitude", "alpha", "beta" }, new string[] { "alpha" }
+			),
+			new WindTunnelMode ( "visualizer", "Visualizer", // TODO: make this its own tool?
+				"Visualize forces acting on the aircraft. Does not run simulations.",
+				true, new string[] { "airspeed", "altitude", "alpha", "beta" }, new string[] { "visualizer" }
+			),
 		};
 
 		static GUIContent[] mode_names = modes_available.Select(mode => new GUIContent(mode.name, mode.description)).ToArray();
@@ -136,6 +144,10 @@ namespace hexagonest.Tools
 		static List<graph_series> simulation_series = new List<graph_series>();
 		static Dictionary<string, bool> series_visible = new Dictionary<string, bool>();
 		static bool has_simulation_data = false;
+
+		static Simulation.SimResults last_results;
+		static bool has_results = false;
+		static bool was_visualizing = false;
 		//static bool graph_updated = false;
 
 		static Rect? graph_rect;
@@ -149,44 +161,56 @@ namespace hexagonest.Tools
 		void OnEnable()
 		{
 			this.minSize = new Vector2(580f, 800f);
+			SceneView.duringSceneGui += show_visuals;
 		}
 
-		static void find_aircraft()
+		void OnDisable()
 		{
-			GameObject prefab_root = SimEnvironment.check_in_prefab("Wind tunnel");
-			if (prefab_root == null) return;
-
-			AircraftData aircraft = AircraftUtils.get_data_from_prefab(prefab_root);
-
-			if (prefab_root != null && aircraft != null)
-			{
-				current_aircraft = aircraft;
-				fuel_level = aircraft.fuel_fraction;
-			}
+			SceneView.duringSceneGui -= show_visuals;
+			if (current_container != null) current_container.transform.rotation = Quaternion.identity;
+			if (current_aircraft == null) return;
+			current_aircraft.reset();
 		}
 
-		// effectively replaces load_aircraft() but intentionally loading now
+		static void show_visuals(SceneView view)
+		{
+			if (current_aircraft == null || !in_wind_tunnel) return;
+			if (current_mode.sim_type != "visualizer") return;
+
+			last_results.forces.visualize(current_aircraft, current_container.transform, last_results.torque);
+			// velocity
+			Simulation.draw_arrow(current_container.transform, Vector3.zero, current_params.velocity, Color.white, 1f, true);
+			// net acceleration (vertically)
+			Vector3 y_accel = new Vector3(0f, (last_results.total.y - (current_aircraft.physics.current_mass * Constants.G)) / current_aircraft.physics.current_mass, 0f);
+			y_accel = Quaternion.Inverse(Simulation.aircraft_orientation(current_params.alpha, current_params.beta)) * y_accel;
+			Simulation.draw_arrow(current_container.transform, current_aircraft.physics.current_cg, y_accel, Color.white, 1f);
+		}
+
 		static void load_aircraft(GameObject aircraft_root, GameObject prefab_used)
 		{
 			current_aircraft = new AircraftData(aircraft_root);
 			current_aircraft_object = aircraft_root;
 			current_prefab = prefab_used;
 
+			if (aircraft_root != prefab_used) current_container = aircraft_root.transform.parent.gameObject;
+
 			fuel_level = current_aircraft.fuel_fraction;
 
 			tunnel_collision_check = false;
+		}
+
+		static void unload_aircraft()
+		{
+			current_aircraft = null;
+			if (current_container != null) current_container.transform.rotation = Quaternion.identity;
+			current_aircraft_object = null;
+			has_results = false;
 		}
 
 		[MenuItem("HexTools/Wind tunnel")]
 		static void open()
 		{
 			AircraftSelector.open_with_target(WindTunnel_Target.instance);
-			//find_aircraft();
-			//if (current_aircraft != null)
-			//{
-			//	var window = GetWindow<WindTunnel>("Wind Tunnel");
-			//	window.minSize = new Vector2(600f, 400f);
-			//}
 		}
 
 		enum aircraft_panel_mode {
@@ -270,27 +294,6 @@ namespace hexagonest.Tools
 			GUILayout.Label($"{Math.Round(aircraft.physics.current_mass / aircraft.physics.wing_area, 2)}kg/m² loading");
 			EditorGUILayout.EndHorizontal();
 
-			// EditorGUILayout.BeginVertical("GroupBox");
-			// show_aircraft_cfg = EditorGUILayout.BeginFoldoutHeaderGroup(show_aircraft_cfg, "Hardpoint selection");
-			// if (show_aircraft_cfg)
-			// {
-			// 	foreach (HardpointGroup group in aircraft.hardpoint_manager.hardpoint_groups)
-			// 	{
-			// 		EditorGUILayout.BeginHorizontal();
-			// 		EditorGUILayout.LabelField($"{group.name}", GUILayout.Width(160f));
-			// 		EditorGUILayout.LabelField($"{group.mass}kg", GUILayout.Width(120f), GUILayout.ExpandWidth(true));
-			// 		EditorGUI.BeginChangeCheck();
-			// 		int new_selection = EditorGUILayout.Popup(group.currently_mounted, group.option_names, GUILayout.Width(240f), GUILayout.ExpandWidth(true));
-			// 		if (EditorGUI.EndChangeCheck())
-			// 		{
-			// 			aircraft.hardpoint_manager.set_group_mounted_option(group.manager_index, new_selection);
-			// 			value_changed = true;
-			// 		}
-			// 		EditorGUILayout.EndHorizontal();
-			// 	}
-			// }
-			// EditorGUILayout.EndVertical();
-			// EditorGUILayout.EndFoldoutHeaderGroup();
 			EditorGUILayout.EndVertical();
 
 			return (value_changed, ctrls_changed);
@@ -305,7 +308,7 @@ namespace hexagonest.Tools
 			GUILayout.FlexibleSpace();
 			using (new EditorGUI.DisabledScope(current_aircraft == null))
 			{
-				if (GUILayout.Button("Mode select", EditorStyles.toolbarButton)) { current_aircraft = null; }
+				if (GUILayout.Button("Mode select", EditorStyles.toolbarButton)) unload_aircraft();
 				if (GUILayout.Button("Rebuild", EditorStyles.toolbarButton)) // rebuild aircraft data to accomodate changes
 				{
 					current_aircraft.reset();
@@ -319,6 +322,7 @@ namespace hexagonest.Tools
 				{
 					if (current_prefab == null) current_prefab = AircraftUtils.get_prefab_from_root(current_aircraft_object);
 					(GameObject container, GameObject new_aircraft, string status) = SimEnvironment.setup_wind_tunnel(current_prefab, true);
+					current_container = container;
 					last_simenv_status = status;
 					load_aircraft(new_aircraft, current_prefab);
 					new_aircraft.transform.localPosition = -current_aircraft.physics.dry_cg;
@@ -329,10 +333,7 @@ namespace hexagonest.Tools
 			var selector_data = WindTunnel_Target.instance;
 			GameObject selected_prefab = selector_data.aircraft_prefab;
 
-			if (selected_prefab != null && selected_prefab != current_prefab)
-			{
-				current_aircraft = null;
-			}
+			if (selected_prefab != null && selected_prefab != current_prefab) unload_aircraft();
 
 			if (current_aircraft == null) {
 				// TODO: make this less terrible, dear lord
@@ -347,6 +348,7 @@ namespace hexagonest.Tools
 					{
 						if (tunnel_collision_check) EditorGUILayout.LabelField("An aircraft was found in the wind tunnel. Click again to replace it. (Irreversible!)");
 						(GameObject container, GameObject new_aircraft, string status) = SimEnvironment.setup_wind_tunnel(selected_prefab, tunnel_collision_check);
+						current_container = container;
 						last_simenv_status = status;
 						if (new_aircraft != null) {
 							load_aircraft(new_aircraft, selected_prefab);
@@ -372,19 +374,18 @@ namespace hexagonest.Tools
 					EditorGUILayout.LabelField("Selecting an aircraft seems to have gone wrong.");
 					EditorGUILayout.LabelField("Close this window and reopen it via the toolbar.");
 
-					GameObject we_might_be_in_a_prefab_anyway = SimEnvironment.check_if_prefab_is_aircraft();
-					if (we_might_be_in_a_prefab_anyway != null)
+					GameObject aircraft_prefab = SimEnvironment.check_if_prefab_is_aircraft();
+					if (aircraft_prefab != null)
 					{
 						if (GUILayout.Button("Or just use the prefab you're in", "AC Button"))
-							load_aircraft(we_might_be_in_a_prefab_anyway, we_might_be_in_a_prefab_anyway);
+							load_aircraft(aircraft_prefab, aircraft_prefab);
 					}
 
-					GameObject we_might_also_be_in_the_tunnel = SimEnvironment.get_aircraft_in_tunnel();
-					if (we_might_also_be_in_the_tunnel != null)
+					(GameObject aircraft_tunnel, GameObject prefab_from_root) = SimEnvironment.get_aircraft_in_tunnel();
+					if (aircraft_tunnel != null)
 					{
-						GameObject prefab_from_root = AircraftUtils.get_prefab_from_root(we_might_also_be_in_the_tunnel);
 						if (GUILayout.Button("Use aircraft currently in tunnel", "AC Button"))
-							load_aircraft(we_might_also_be_in_the_tunnel, prefab_from_root);
+							load_aircraft(aircraft_tunnel, prefab_from_root);
 							// TODO: grab previous inputs and replace input_panel?
 					}
 				}
@@ -415,11 +416,14 @@ namespace hexagonest.Tools
 			HashSet<string> show_params = current_mode.parameters_shown;
 			bool params_changed = ctrls_changed || cfg_changed || mode_changed;
 
-			EditorGUI.BeginChangeCheck();
-			current_mode.current_sweep = GUILayout.Toolbar(current_mode.current_sweep, current_mode.sweep_params);
-			if (EditorGUI.EndChangeCheck()) {
-				params_changed = true;
-				current_mode.sweep_param = current_mode.sweep_params[current_mode.current_sweep];
+			if (current_mode.sweep_params.Length > 0)
+			{
+				EditorGUI.BeginChangeCheck();
+				current_mode.current_sweep = GUILayout.Toolbar(current_mode.current_sweep, current_mode.sweep_params);
+				if (EditorGUI.EndChangeCheck()) {
+					params_changed = true;
+					current_mode.sweep_param = current_mode.sweep_params[current_mode.current_sweep];
+				}
 			}
 
 			// Sweep param
@@ -494,7 +498,6 @@ namespace hexagonest.Tools
 		private void run_simulation(float dt = 1f)
 		{
 			simulating = true;
-			//find_aircraft();
 			if (current_aircraft == null) { Debug.LogError("No aircraft selected, or no prefab available"); return; }
 
 			simulation_series.ForEach(series => series_visible[series.name] = series.visible);
@@ -516,10 +519,12 @@ namespace hexagonest.Tools
 			graph_series trim_series = new graph_series { name = "Trim", color = new Color(0.8f, 0.4f, 1.0f) };
 			// reused as the pitch angle line for trim_sweep's airspeed sweep
 			graph_series one_g_series = new graph_series { name = "1G", color = Color.white, };
+			graph_series stability_series = new graph_series { name = "Stability index", color = Color.white, };
 
 			new_series.AddRange(new[] {
 				lift_series, clift_series, drag_series, cdrag_series, ld_series,
-				t_pitch_series, t_yaw_series, t_roll_series, trim_series, one_g_series
+				t_pitch_series, t_yaw_series, t_roll_series, trim_series, one_g_series,
+				stability_series
 			});
 
 			// initial values
@@ -544,8 +549,32 @@ namespace hexagonest.Tools
 				sweep_min = -1; sweep_max = 1; // pitch/roll/yaw (or the range isn't set up right)
 			}
 
+
 			float simulation_began = Time.realtimeSinceStartup;
+			float simulation_ended;
 			Simulation.num_simulations = 0;
+			if (sweep_param == "visualizer")
+			{
+				if (SimEnvironment.check_in_sim_scene(current_aircraft)) current_container.transform.rotation = Quaternion.identity;
+
+				last_results = Simulation.aircraft_forces(current_aircraft, sim_params);
+				//last_results = Simulation.update_and_simulate(current_aircraft, sim_params, input_panel.inputs_obj);
+				has_results = true;
+
+				if (SimEnvironment.check_in_sim_scene(current_aircraft))
+				{
+					current_container.transform.rotation = Simulation.aircraft_orientation(sim_params.alpha, sim_params.beta);
+				}
+
+				simulation_ended = Time.realtimeSinceStartup;
+				last_sim_time = simulation_ended - simulation_began;
+				last_sim_count = Simulation.num_simulations;
+				was_visualizing = true;
+				simulating = false;
+				return;
+			} else if (was_visualizing) {
+				if (SimEnvironment.check_in_sim_scene(current_aircraft)) current_container.transform.rotation = Quaternion.identity;
+			}
 			for (int i = 0; i < simulation_steps; i++)
 			{
 				float sweep_value = sweep_min + (i * ((sweep_max - sweep_min) / (simulation_steps - 1)));
@@ -596,39 +625,46 @@ namespace hexagonest.Tools
 						float s_roll = sweep_param == "roll" ? sweep_value : input_panel.roll;
 						float s_yaw = sweep_param == "yaw" ? sweep_value : input_panel.yaw;
 						current_aircraft.update(sim_params, new ControlInputs { pitch = s_pitch, roll = s_roll, yaw = s_yaw });
-						results = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad);
+						results = Simulation.aircraft_forces(current_aircraft, sim_params);
+						break;
+					case "stability_index":
+						float stability_index = Simulation.neutral_point_z(current_aircraft, sim_params, input_panel.inputs_obj);
+						stability_series.Add(new Vector2(result_index, stability_index));
 						break;
 					default:
 						if (sweep_param == "airspeed") current_aircraft.update(sim_params, input_panel.inputs_obj);
-						results = Simulation.aircraft_forces(current_aircraft, s_vel, s_alt, s_alpha * Mathf.Deg2Rad, s_beta * Mathf.Deg2Rad);
+						results = Simulation.aircraft_forces(current_aircraft, sim_params);
 						break;
 				}
-				
-				float total_lift = results.lift.y;//Math.Sign(results.lift.y) * results.lift.magnitude;
-				float total_drag = results.drag.magnitude;
-				float total_area = current_aircraft.physics.wing_area + current_aircraft.physics.drag_area;
 
-				float dyn_pres = 0.5f * Simulation.isa_atm(s_alt).rho * (s_vel * s_vel);
-				//Debug.Log($"Lift: {total_lift}, dyn pres: {dyn_pres}, wing area: {current_aircraft.physics.wing_area}");
-				float cl = total_lift / (dyn_pres * current_aircraft.physics.wing_area);
-				float cd = total_drag / (dyn_pres * total_area);
+				if (results.total != Vector3.zero)
+				{
+					float total_lift = Math.Sign(results.lift.y) * results.lift.magnitude;
+					float total_drag = results.drag.magnitude;
+					float total_area = current_aircraft.physics.wing_area + current_aircraft.physics.drag_area;
 
-				clift_series.Add(new Vector2(result_index, cl));
-				cdrag_series.Add(new Vector2(result_index, cd));
+					float dyn_pres = 0.5f * Simulation.isa_atm(s_alt).rho * (s_vel * s_vel);
+					//Debug.Log($"Lift: {total_lift}, dyn pres: {dyn_pres}, wing area: {current_aircraft.physics.wing_area}");
+					float cl = total_lift / (dyn_pres * current_aircraft.physics.wing_area);
+					float cd = total_drag / (dyn_pres * total_area);
 
-				float lift_drag_ratio = cl / cd; // total_lift / total_drag;
+					clift_series.Add(new Vector2(result_index, cl));
+					cdrag_series.Add(new Vector2(result_index, cd));
 
-				// todo: figure out a good way for modes to add their own series outputs + choosing which of these to include
-				lift_series.Add(new Vector2(result_index, total_lift));
-				ld_series.Add(new Vector2(result_index, lift_drag_ratio));
-				drag_series.Add(new Vector2(result_index, total_drag));
-				t_pitch_series.Add(new Vector2(result_index, results.torque.x));
-				t_yaw_series.Add(new Vector2(result_index, results.torque.y));
-				t_roll_series.Add(new Vector2(result_index, results.torque.z));
+					float lift_drag_ratio = cl / cd; // total_lift / total_drag;
+
+					// todo: figure out a good way for modes to add their own series outputs + choosing which of these to include
+					lift_series.Add(new Vector2(result_index, total_lift));
+					ld_series.Add(new Vector2(result_index, lift_drag_ratio));
+					drag_series.Add(new Vector2(result_index, total_drag));
+					t_pitch_series.Add(new Vector2(result_index, results.torque.x));
+					t_yaw_series.Add(new Vector2(result_index, results.torque.y));
+					t_roll_series.Add(new Vector2(result_index, results.torque.z));
+				}
 
 				min_index = Mathf.Min(min_index, result_index); max_index = Mathf.Max(max_index, result_index);
 			}
-			float simulation_ended = Time.realtimeSinceStartup;
+			simulation_ended = Time.realtimeSinceStartup;
 			last_sim_time = simulation_ended - simulation_began;
 			last_sim_count = Simulation.num_simulations;
 
@@ -672,7 +708,7 @@ namespace hexagonest.Tools
 				return entry;
 			}).ToList();
 
-			(float x_min, float x_max, float y_min, float y_max) = UI.autofit_series(series_compiled);
+			//(float x_min, float x_max, float y_min, float y_max) = UI.autofit_series(series_compiled);
 
 			simulation_series = series_compiled;
 			has_simulation_data = true;

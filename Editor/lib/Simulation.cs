@@ -62,23 +62,87 @@ namespace hexagonest.Tools
 
 		// collects output forces in one place
 		public class SimForces {
+			public Vector3 root_position;
 			public List<ForcePos> total = new List<ForcePos>(), lift = new List<ForcePos>(),
 				drag = new List<ForcePos>(), torque = new List<ForcePos>();
 			
-			public void add(Vector3 pos, Vector3 _total, Vector3 _lift, Vector3 _drag, Vector3 _torque)
+			public void add(Vector3 _pos, Vector3 _total, Vector3 _lift, Vector3 _drag, Vector3 _torque)
 			{
+				Vector3 pos = _pos - root_position;
 				total.Add(new ForcePos(_total, pos));
 				lift.Add(new ForcePos(_lift, pos));
 				drag.Add(new ForcePos(_drag, pos));
 				torque.Add(new ForcePos(_torque, pos));
 			}
+
+			// shows lift, drag, torque
+			public void visualize(AircraftData aircraft, Transform root_transform, Vector3 total_torque)
+			{
+				Transform root = aircraft.root.transform;
+
+				Handles.color = Color.yellow;
+				Vector3 cg = aircraft.physics.current_cg;
+				Vector3 cg_relative = root_transform.TransformPoint(cg);
+				Handles.SphereHandleCap(0, cg_relative, Quaternion.identity, 0.5f, EventType.Repaint);
+				
+				lift.ForEach(force => draw_arrow(root, force.pos, force.force, new Color(0.2f, 0.2f, 1.0f)));
+				drag.ForEach(force => draw_arrow(root, force.pos, force.force, new Color(1.0f, 0.4f, 0.2f)));
+
+				// pitch
+				draw_torque(root_transform, new Vector3(0f, 0f, 0f), new Vector3(total_torque.x, 0f, 0f), new Color(1.0f, 0.4f, 0.2f));
+				// roll
+				draw_torque(root_transform, new Vector3(0f, 0f, 0f), new Vector3(0f, 0f, total_torque.z), new Color(0.2f, 0.2f, 1.0f));
+				// yaw
+				draw_torque(root_transform, new Vector3(0f, 0f, 0f), new Vector3(0f, total_torque.y, 0f), new Color(0.2f, 1.0f, 0.2f));
+			}
 		}
+
+
+		public static void draw_arrow(Transform relative_to, Vector3 position, Vector3 vector, Color color, float force_scale = 0.25f, bool linear = false)
+		{
+			if (vector == Vector3.zero) return;
+			Handles.color = color;
+			Vector3 origin = relative_to.TransformPoint(position);
+			Vector3 dir = relative_to.TransformDirection(vector);
+			float len = vector.magnitude;
+			if (!linear) len = Mathf.Log(1 + vector.magnitude);
+			len = Mathf.Clamp(len * force_scale, 0.01f, 25f);
+			Handles.ArrowHandleCap(0, origin, Quaternion.LookRotation(dir), len, EventType.Repaint);
+		}
+
+
+		public static void draw_torque(Transform relative_to, Vector3 position, Vector3 torque, Color color, float radius = 5f)
+		{
+			if (torque == Vector3.zero) return;
+			float mag = torque.magnitude;
+			Handles.color = color;
+			Vector3 origin = relative_to.TransformPoint(position);
+			Vector3 axis = torque / mag;
+			axis = new Vector3(Mathf.Abs(axis.x), Mathf.Abs(axis.y), Mathf.Abs(axis.z));
+			float sign = Vector3.Dot(torque, axis) > 0 ? 1 : -1;
+			Vector3 from = Vector3.Cross(axis, Vector3.up);
+			if (from.sqrMagnitude < 1e-4f) from = Vector3.Cross(axis, Vector3.right);
+			from.Normalize();
+			float sweep = sign * 300f * (1f - Mathf.Exp(-mag / 1e6f));//Mathf.Clamp(Mathf.Log(1 + mag) / 6, 0.01f, 1f);
+
+			Handles.DrawWireArc(origin, axis, from, sweep, radius, 3f);
+
+			Vector3 end = origin + Quaternion.AngleAxis(sweep, axis) * from * radius;
+			Vector3 tangent = Vector3.Cross(axis, end - origin).normalized;
+			Handles.ConeHandleCap(0, end, Quaternion.LookRotation(sign * tangent), radius * 0.15f, EventType.Repaint);
+		}
+
+
 		public struct SimResults { public Vector3 total, lift, drag, torque; public SimForces forces; }
 
+		public static Quaternion aircraft_orientation(float alpha, float beta)
+		{
+			return Quaternion.Inverse(Quaternion.LookRotation(velocity_vector(alpha, beta), Vector3.up));
+		}
 
 		public static Vector3 velocity_vector(float alpha, float beta)
 		{
-			return new Vector3(Mathf.Sin(beta), -Mathf.Sin(alpha), Mathf.Cos(alpha)).normalized;
+			return (Quaternion.Euler(alpha * Mathf.Rad2Deg, beta * Mathf.Rad2Deg, 0f) * Vector3.forward);
 		}
 
 
@@ -148,6 +212,18 @@ namespace hexagonest.Tools
 		}
 
 
+		public static float neutral_point_z(AircraftData aircraft, AircraftState state, ControlInputs controls)
+		{
+			const float d = 0.5f * Mathf.Deg2Rad;
+			float initial_alpha = state.alpha;
+			SimResults a = aircraft_forces(aircraft, state.set(state => state.alpha = initial_alpha - d));
+			SimResults b = aircraft_forces(aircraft, state.set(state => state.alpha = initial_alpha + d));
+			float dm = b.torque.x - a.torque.x;
+			float df = b.total.y - a.total.y;
+			return (aircraft.physics.current_cg.z - dm / df);
+		}
+
+
 		public static SimResults update_and_simulate(AircraftData aircraft, AircraftState state, ControlInputs controls)
 		{
 			aircraft.update(state, controls);
@@ -187,7 +263,7 @@ namespace hexagonest.Tools
 			Vector3 sum_total = Vector3.zero, sum_lift = Vector3.zero, sum_drag = Vector3.zero, sum_torque = Vector3.zero;
 			Airfoil[] foils = aircraft.airfoils;
 
-			SimForces forces = new SimForces();
+			SimForces forces = new SimForces { root_position = aircraft.root.transform.position };
 			
 			foreach (Part part in aircraft.parts)
 			{
@@ -334,7 +410,7 @@ namespace hexagonest.Tools
 
 			if (container != null) // already existed, so we should check for an existing aircraft here
 			{
-				GameObject existing_aircraft = get_aircraft_in_tunnel();
+				(GameObject existing_aircraft, GameObject prefab) = get_aircraft_in_tunnel();
 				if (existing_aircraft != null)
 				{
 					if (remove_existing) UnityEngine.Object.DestroyImmediate(existing_aircraft);
@@ -358,15 +434,19 @@ namespace hexagonest.Tools
 
 
 		// tries to find an aircraft if we're currently in the wind tunnel
-		public static GameObject get_aircraft_in_tunnel()
+		public static (GameObject root, GameObject prefab) get_aircraft_in_tunnel()
 		{
-			if (EditorSceneManager.GetActiveScene().path != sim_scene_path) return null;
+			if (EditorSceneManager.GetActiveScene().path != sim_scene_path) return (null, null);
 			
 			var container = GameObject.Find(container_scene_path);
-			if (container == null) return null;
+			if (container == null) return (null, null);
 
 			var aircraft = container.GetComponentInChildren(game_type("Aircraft"));
-			return aircraft != null ? aircraft.gameObject : null;
+			GameObject prefab = null;
+			if (aircraft != null && aircraft.gameObject != null) {
+				prefab = AircraftUtils.get_prefab_from_root(aircraft.gameObject);
+			}
+			return (aircraft != null ? aircraft.gameObject : null, prefab);
 		}
 
 
