@@ -772,6 +772,15 @@ namespace hexagonest.Tools
 		public static Type game_type(string class_name) => Assembly.Load("Assembly-CSharp").GetType(class_name);
 
 
+		public static string hierarchy_path(Transform obj, Transform root)
+		{
+			List<string> parts = new List<string>();
+			for (; obj != null && obj != root; obj = obj.parent) parts.Add(obj.name);
+			parts.Reverse();
+			return string.Join("/", parts);
+		}
+
+
 		public static T find_prop<T>(SerializedObject s_obj, string field)
 		{
 			return (T)s_obj.FindProperty(field).boxedValue;
