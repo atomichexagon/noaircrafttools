@@ -445,7 +445,7 @@ namespace hexagonest.Tools
 				p_fixed["alpha"].current_value, p_fixed["beta"].current_value
 			);
 
-			if (!simulating & (params_changed || was_updating || update_queued)) {
+			if (!simulating && (params_changed || was_updating || update_queued)) {
 				// keeps itself running with was_updating to allow smooth movement
 				if (can_update)
 				{
