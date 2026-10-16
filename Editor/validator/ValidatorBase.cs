@@ -12,13 +12,13 @@ using static hexagonest.Tools.Utilities;
 
 namespace hexagonest.Validator
 {
-	internal enum Status { pass, info, warn, fail, critical }
+	internal enum Status { skipped, pass, info, warn, fail, critical }
 
 	internal class ValidatorResult
 	{
 		public readonly string validator_name;
 		public readonly Transform root;
-		public Status status { get; private set; } = Status.pass;
+		public Status status { get; private set; } = Status.skipped;
 		public List<Entry> entries = new List<Entry>();
 
 		private int _num_passing = 0;
@@ -46,7 +46,7 @@ namespace hexagonest.Validator
 			return this;
 		}
 
-		public void pass() => _num_passing += 1;
+		public void pass() { _num_passing += 1; if (status < Status.pass) status = Status.pass; }
 
 		public ValidatorResult info(string component, string field, bool condition, string message, UnityEngine.Object context = null, List<Fix> actions = null)
 			=> new_entry(component, field, condition, Status.info, message, context, actions);

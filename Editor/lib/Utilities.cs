@@ -768,8 +768,34 @@ namespace hexagonest.Tools
 			finally { UnityEngine.Object.DestroyImmediate(probe); }
 		}
 
+		static readonly Dictionary<string, Type> type_cache = new Dictionary<string, Type>();
 
-		public static Type game_type(string class_name) => Assembly.Load("Assembly-CSharp").GetType(class_name);
+		public static Type game_type(string class_name) // => Assembly.Load("Assembly-CSharp").GetType(class_name);
+		{
+			if (type_cache.TryGetValue(class_name, out var cached) && cached != null) return cached;
+
+			Type found = null;
+
+			var main = AppDomain.CurrentDomain.GetAssemblies()
+				.FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
+			found = main?.GetType(class_name);
+
+			if (found == null)
+			{
+				foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+				{
+					found = asm.GetType(class_name);
+					if (found != null) break;
+				}
+			}
+
+			if (found == null && !class_name.Contains('.'))
+				found = TypeCache.GetTypesDerivedFrom<object>()
+					.FirstOrDefault(t => t.Name == class_name);
+
+			type_cache[class_name] = found;
+			return found;
+		}
 
 
 		public static string hierarchy_path(Transform obj, Transform root)
@@ -782,25 +808,80 @@ namespace hexagonest.Tools
 
 
 		public static T find_prop<T>(SerializedObject s_obj, string field)
-		{
-			return (T)s_obj.FindProperty(field).boxedValue;
-		}
+			=> (T)s_obj.FindProperty(field).boxedValue;
 
 		public static SerializedProperty find_prop(SerializedObject s_obj, string field)
-		{
-			return s_obj.FindProperty(field);
-		}
+			=> s_obj.FindProperty(field);
 
 
 		public static T find_prop_rel<T>(SerializedProperty s_prop, string field)
-		{
-			return (T)s_prop.FindPropertyRelative(field).boxedValue;
-		}
+			=> (T)s_prop.FindPropertyRelative(field).boxedValue;
 
 		public static SerializedProperty find_prop_rel(SerializedProperty s_prop, string field)
+			=> s_prop.FindPropertyRelative(field);
+
+
+		public static T get_element<T>(SerializedProperty s_prop, int i)
+			=> (T)s_prop.GetArrayElementAtIndex(i).boxedValue;
+
+		public static SerializedProperty get_element(SerializedProperty s_prop, int i)
+			=> s_prop.GetArrayElementAtIndex(i);
+
+
+		public static List<string> get_enums_active(Type enum_type, int value)
 		{
-			return s_prop.FindPropertyRelative(field);
+			var set = new List<string>();
+			bool is_flags = enum_type.IsDefined(typeof(FlagsAttribute), false);
+
+			foreach (var v in Enum.GetValues(enum_type))
+			{
+				int bit = Convert.ToInt32(v);
+				if (is_flags)
+				{
+					if (bit != 0 && (value & bit) == bit) set.Add(v.ToString());
+				}
+				else if (value == bit) set.Add(v.ToString());
+			}
+			return set;
 		}
+
+
+		public static void set_enum(SerializedProperty prop, Type enum_type, params string[] names)
+		{
+			if (enum_type.IsDefined(typeof(FlagsAttribute), false))
+			{
+				// Enum.Parse accepts comma-separated names, including composite entries like OwnerAndObservers
+				var value = Enum.Parse(enum_type, string.Join(",", names));
+				prop.enumValueFlag = Convert.ToInt32(value);
+			}
+			else
+			{
+				int index = Array.IndexOf(prop.enumNames, names[0]);
+				if (index >= 0) prop.enumValueIndex = index;
+				else Debug.LogWarning($"{names[0]} not found in {enum_type.Name}");
+			}
+		}
+
+
+		public static bool check_list<T>(List<T> values, List<T> should_contain)
+		{
+			bool failed = false;
+			foreach (var should in should_contain) { failed |= !values.Contains(should); } //Debug.Log($"expected {should}, found: {values.Contains(should)}");
+			foreach (var item in values) { failed |= !should_contain.Contains(item); } //Debug.Log($"found {item}, expected: {should_contain.Contains(item)}");
+			return !failed;
+		}
+
+
+		public static List<string> find_prop_enums(SerializedObject s_obj, string field, Type enum_type)
+			=> get_enums_active(enum_type, s_obj.FindProperty(field).enumValueFlag);
+
+
+		public static List<string> find_prop_enums_rel(SerializedProperty s_prop, string field, Type enum_type)
+			=> get_enums_active(enum_type, s_prop.FindPropertyRelative(field).enumValueFlag);
+
+
+		public static bool fuzzy_eq(float num1, float num2, float epsilon = 0.001f)
+			=> Mathf.Abs(num1 - num2) < epsilon;
 
 
 		public static Transform get_child_or_make_empty(GameObject parent, string child_name)

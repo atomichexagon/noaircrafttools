@@ -22,6 +22,8 @@ namespace hexagonest.Validator
 		private static bool ran_first_run = false;
 
 		private static List<ValidatorResult> results = new List<ValidatorResult>();
+		private static List<ValidatorResult> sorted_results = new List<ValidatorResult>();
+
 		private static int num_passing = 0, num_warnings = 0, num_total = 0;
 		private static float last_update_elapsed = 0f;
 		private static float last_update_time = -1f;
@@ -32,11 +34,20 @@ namespace hexagonest.Validator
 
 		static Dictionary<Status, GUIStyle> status_styles = new Dictionary<Status, GUIStyle>();
 		static readonly Dictionary<Status, Color> status_colors = new Dictionary<Status, Color>{
+			[Status.skipped] 	= new Color(0.6f, 0.6f, 0.6f),
 			[Status.pass] 		= new Color(0.4f, 0.8f, 0.4f),
 			[Status.info] 		= new Color(0.5f, 0.7f, 1.0f),
 			[Status.warn] 		= new Color(1.0f, 0.8f, 0.2f),
 			[Status.fail] 		= new Color(1.0f, 0.5f, 0.2f),
 			[Status.critical] 	= new Color(1.0f, 0.3f, 0.3f)
+		};
+		static readonly Dictionary<Status, string> status_text = new Dictionary<Status, string>{
+			[Status.skipped] 	= "Skipped",
+			[Status.pass]		= "Pass",
+			[Status.info]		= "Info",
+			[Status.warn]		= "Warn",
+			[Status.fail]		= "Fail",
+			[Status.critical]	= "Critical",
 		};
 
 
@@ -225,7 +236,7 @@ namespace hexagonest.Validator
 			int new_pass = 0, new_warnings = 0, new_total = 0;
 			List<ValidatorResult> new_results = new List<ValidatorResult>();
 
-			last_validation = Status.pass;
+			last_validation = Status.skipped;
 			float validate_began = Time.realtimeSinceStartup;
 			foreach (IValidator validator in sorted_validators)
 			{
@@ -241,15 +252,21 @@ namespace hexagonest.Validator
 			num_passing = new_pass; num_warnings = new_warnings; num_total = new_total;
 
 			results = new_results;
+			sorted_results = results.OrderByDescending(entry => entry.status)
+				.ThenByDescending(entry => entry.num_warnings)
+				//.ThenByDescending(entry => entry.num_entries)
+				.ToList();
 		}
 
 
 		private void draw_result(ValidatorResult result)
 		{
+			bool first_drawn = true;
 			EditorGUILayout.BeginVertical("box");
 			var sorted = result.entries.OrderByDescending(entry => entry.status).ToList();
-			sorted.ForEach(entry => draw_entry(entry));
-			if (result.num_passing > 0) draw_row(result.validator_name, Status.pass, null, $"{result.num_passing}/{result.num_entries}");
+			sorted.ForEach(entry => { if(!first_drawn) entry.check_name = ""; draw_entry(entry); first_drawn = false; });
+			if (result.status == Status.skipped) draw_row(first_drawn ? result.validator_name : "", Status.skipped, null, "Skipped"); // (no validation required)
+			if (result.num_passing > 0) draw_row(first_drawn ? result.validator_name : "", Status.pass, null, $"{result.num_passing}/{result.num_entries} passed");
 			EditorGUILayout.EndVertical();
 		}
 
@@ -258,21 +275,12 @@ namespace hexagonest.Validator
 
 		private void draw_row(string validator, Status status, UnityEngine.Object context, string message, List<Fix> actions = null, string str_status = "", string str_context = "", string str_actions = "", Entry entry = null)
 		{
-			string status_text = status switch
-			{
-				Status.pass			=> "Pass",//"CN EntryInfoIconSmall",
-				Status.info			=> "Info",//"CN EntryInfoIconSmall",
-				Status.warn			=> "Warn",//"CN EntryWarnIconSmall",
-				Status.fail			=> "Fail",//"CN EntryErrorIconSmall",
-				Status.critical		=> "Critical",//"CN EntryErrorIconSmall",
-				_					=> "??",//"CN EntryErrorIconSmall", // ??
-			};
 			var status_style = GUI.skin.label;
 			if (str_status == "") status_style = get_status_style(status);
-			if (str_status != "") status_text = str_status;
+			string status_msg = (str_status != "" ? str_status : status_text[status]);
 			EditorGUILayout.BeginHorizontal();
 			GUILayout.Label($" {validator} ", GUILayout.Width(120));
-			GUILayout.Label($" {status_text} ", status_style, GUILayout.Width(60));
+			GUILayout.Label($" {status_msg} ", status_style, GUILayout.Width(60));
 			string context_str = context != null ? context.name : "";
 			bool context_button = false;
 			if (context != null)
@@ -287,7 +295,7 @@ namespace hexagonest.Validator
 					go_to(entry);
 				}
 			} else  GUILayout.Label(context_str, EditorStyles.wordWrappedLabel, GUILayout.Width(120));
-			GUILayout.Label($" {message} ", EditorStyles.wordWrappedLabel, GUILayout.Width(360), GUILayout.ExpandWidth(true));
+			GUILayout.Label($" {message} ", EditorStyles.wordWrappedLabel, GUILayout.ExpandWidth(true)); //GUILayout.Width(360), 
 
 			GUILayout.FlexibleSpace();
 			if (actions != null)
@@ -299,7 +307,7 @@ namespace hexagonest.Validator
 						}
 					}
 				}
-			if (str_actions != null)
+			if (str_actions != "")
 			{
 				GUILayout.Label($" {str_actions} ");
 			}
@@ -331,18 +339,15 @@ namespace hexagonest.Validator
 			}
 			EditorGUILayout.EndVertical();
 
-			EditorGUILayout.BeginVertical("GroupBox", GUILayout.ExpandHeight(true));
+			EditorGUILayout.BeginVertical("GroupBox", GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
 			scroll = EditorGUILayout.BeginScrollView(scroll);
-			draw_row("Validator", Status.pass, null, "Message", null, "Status", "Context");
-			if (results.Count == 0)
+			draw_row("Validator", Status.pass, null, "Message", null, "Status", "Context", "Actions");
+			if (sorted_results.Count == 0)
 			{
 				EditorGUILayout.BeginHorizontal();
 				GUILayout.Label("No results to show", "Badge");
 				EditorGUILayout.EndHorizontal();
 			} else {
-				var sorted_results = results.OrderByDescending(entry => entry.num_warnings)
-					.ThenByDescending(entry => entry.num_entries)
-					.ToList();
 				sorted_results.ForEach(results_entry => draw_result(results_entry));
 			}
 			EditorGUILayout.EndScrollView();

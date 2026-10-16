@@ -113,10 +113,10 @@ namespace hexagonest.Validator
 			var loadouts = find_prop(ser_params, "loadouts");
 			results.critical("", "loadouts", loadouts.arraySize < 2, "must have at least 2 Loadouts", aircraft_parameters);
 			if (loadouts.arraySize < 2) return results;
-			// TODO: somehow check how many hardpoints there actually are to make sure these are sized correctly
 
 			var std_loadouts = find_prop(ser_params, "StandardLoadouts");
 			results.warn("", "StandardLoadouts", std_loadouts.arraySize < 1, "should have at least 1 StandardLoadout", aircraft_parameters);
+			// TODO: StandardLoadouts
 			//if (std_loadouts.arraySize < 1) return results;
 			
 			// liveries
@@ -130,15 +130,15 @@ namespace hexagonest.Validator
 			{
 				var livery = liveries.GetArrayElementAtIndex(i);
 				var livery_asset = find_prop_rel<AssetReference>(livery, "assetReference");
-				results.fail("", $"liveries.Array.data[{i}].assetReference", livery_asset == null, $"missing asset on livery {i}", aircraft_parameters);
-				results.warn("", $"liveries.Array.data[{i}].name", find_prop_rel<string>(livery, "name") == "", $"missing name on livery {i}", aircraft_parameters);
+				results.fail("", $"liveries.Array.data[{i}].assetReference", livery_asset == null, $"livery {i} missing asset", aircraft_parameters);
+				results.warn("", $"liveries.Array.data[{i}].name", find_prop_rel<string>(livery, "name") == "", $"livery {i} missing name", aircraft_parameters);
 				var faction_obj = find_prop_rel<UnityEngine.Object>(livery, "faction");
 				if (faction_obj != null) {
 					is_faction_specific = true;
 					var ser_faction = new SerializedObject(faction_obj);
 					factions_available.Add(find_prop<string>(ser_faction, "factionTag"));
 				}
-				results.info("", $"liveries.Array.data[{i}].faction", faction_obj == null, $"missing faction on livery {i} (ignore if intended to be universal)", aircraft_parameters);
+				results.info("", $"liveries.Array.data[{i}].faction", faction_obj == null, $"livery {i} missing faction (ignore if intended to be universal)", aircraft_parameters);
 			}
 			// this is ass
 			string missing_faction = "";
