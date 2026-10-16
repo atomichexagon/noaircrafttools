@@ -169,10 +169,10 @@ namespace hexagonest.Validator
 			results.warn("", "aircraftName", aircraft_name == "", "missing AircraftName", aircraft_parameters);
 			string unit_name = find_prop<string>(ser_def, "unitName");
 			results.info("", "aircraftName", aircraft_name != unit_name,
-				$"AircraftName ({aircraft_name}) doesn't match def's UnitName ({unit_name})", aircraft_parameters, new List<Fix>{
-					new Fix($"Use {aircraft_name}", () => Debug.Log($"use {aircraft_name}")),
-					new Fix($"Use {unit_name}", () => Debug.Log($"use {unit_name}"))
-			});
+				$"AircraftName ({aircraft_name}) doesn't match def's UnitName ({unit_name})", aircraft_parameters); //, new List<Fix>{
+				//	new Fix($"Use {aircraft_name}", () => Debug.Log($"use {aircraft_name}")),
+				//	new Fix($"Use {unit_name}", () => Debug.Log($"use {unit_name}"))
+				//});
 
 			//results.info(find_prop<int>(ser_params, "rankRequired") <= 0, "RankRequired <= 0", aircraft_parameters);
 			results.info("", "DefaultFuelLevel", find_prop<float>(ser_params, "DefaultFuelLevel") <= 0, "DefaultFuelLevel <= 0", aircraft_parameters);
@@ -191,10 +191,10 @@ namespace hexagonest.Validator
 			float maneuverability = find_prop_rel<float>(aircraft_info, "maneuverability");
 			results.warn("", "aircraftGLimit", g_limit <= 0, "AircraftGLimit <= 0", aircraft_parameters);
 			results.info("", "aircraftGLimit", g_limit != maneuverability,
-				$"AircraftGLimit ({g_limit:F2}) doesn't match def's Maneuverability ({maneuverability:F2})", aircraft_parameters, new List<Fix>{
-					new Fix($"Use {g_limit:F2}", () => Debug.Log($"use {g_limit}")),
-					new Fix($"Use {maneuverability:F2}", () => Debug.Log($"use {maneuverability}"))
-			});
+				$"AircraftGLimit ({g_limit:F2}) doesn't match def's Maneuverability ({maneuverability:F2})", aircraft_parameters);//, new List<Fix>{
+				//	new Fix($"Use {g_limit:F2}", () => Debug.Log($"use {g_limit}")),
+				//	new Fix($"Use {maneuverability:F2}", () => Debug.Log($"use {maneuverability}"))
+				//});
 
 			results.info("", "PIDReferenceAirspeed", find_prop<float>(ser_params, "PIDReferenceAirspeed") <= 0, "PIDReferenceAirspeed <= 0", aircraft_parameters);
 			results.info("", "maxSpeed", find_prop<float>(ser_params, "maxSpeed") <= 0, "MaxSpeed <= 0", aircraft_parameters);

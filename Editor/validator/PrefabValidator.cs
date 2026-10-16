@@ -56,7 +56,7 @@ namespace hexagonest.Validator
 		}
 
 
-		static public void update_object(UnityEngine.Object asset_obj, Action<SerializedObject> update, string action_taken)
+		static public bool update_object(UnityEngine.Object asset_obj, Action<SerializedObject> update, string action_taken)
 		{
 			var target = resolve_stage(asset_obj);
 			var ser_obj = new SerializedObject(target);
@@ -69,21 +69,22 @@ namespace hexagonest.Validator
 			else if (EditorUtility.IsPersistent(target)) AssetDatabase.SaveAssets();
 
 			InternalEditorUtility.RepaintAllViews();
+			return true;
 		}
 
-		static public void update_field(UnityEngine.Object asset_obj, string field_name, Action<SerializedProperty> update, string action_taken)
+		static public bool update_field(UnityEngine.Object asset_obj, string field_name, Action<SerializedProperty> update, string action_taken)
 			=> update_object(asset_obj, obj => update(find_prop(obj, field_name)), action_taken);
 
-		static public void update_field(UnityEngine.Object asset_obj, string field_name, UnityEngine.Object asset_value, string action_taken)
+		static public bool update_field(UnityEngine.Object asset_obj, string field_name, UnityEngine.Object asset_value, string action_taken)
 			=> update_field(asset_obj, field_name, prop => prop.objectReferenceValue = resolve_stage(asset_value), action_taken);
 
-		static public void update_field(UnityEngine.Object asset_obj, string field_name, string value, string action_taken)
+		static public bool update_field(UnityEngine.Object asset_obj, string field_name, string value, string action_taken)
 			=> update_field(asset_obj, field_name, prop => prop.stringValue = value, action_taken);
 
-		static public void update_field(UnityEngine.Object asset_obj, string field_name, float value, string action_taken)
+		static public bool update_field(UnityEngine.Object asset_obj, string field_name, float value, string action_taken)
 			=> update_field(asset_obj, field_name, prop => prop.floatValue = value, action_taken);
 
-		static public void update_field(UnityEngine.Object asset_obj, string field_name, int value, string action_taken)
+		static public bool update_field(UnityEngine.Object asset_obj, string field_name, int value, string action_taken)
 			=> update_field(asset_obj, field_name, prop => prop.intValue = value, action_taken);
 	}
 
@@ -290,7 +291,7 @@ namespace hexagonest.Validator
 			var ser_wep = new SerializedObject(weapon_manager);
 			bool wep_aircraft_ref = ValidationUtils.check_reference(ser_wep, "aircraft", aircraft_comp);
 			results.critical("WeaponManager", "aircraft", !wep_aircraft_ref, "Aircraft reference missing or wrong", wep_go,
-				new List<Fix>{ new Fix($"Auto set", () => Debug.Log("set WeaponManager.aircraft")) });
+				new List<Fix>{ new Fix($"Auto set", () => ValidationUtils.update_field(weapon_manager, "aircraft", aircraft_comp, "auto set WeaponManager.aircraft")) });
 			if (!wep_aircraft_ref) return results;
 
 			var hardpoint_sets = find_prop(ser_wep, "hardpointSets");
@@ -428,7 +429,7 @@ namespace hexagonest.Validator
 
 				bool part_aircraft_ref = ValidationUtils.check_reference(ser_part, "parentUnit", aircraft_comp);
 				results.critical("AeroPart", "parentUnit", !part_aircraft_ref, "ParentUnit missing", go,
-					new List<Fix>{ new Fix($"Auto set", () => Debug.Log("set AeroPart.parentUnit")) });
+					new List<Fix>{ new Fix($"Auto set", () => ValidationUtils.update_field(aero_part, "parentUnit", aircraft_comp, "auto set AeroPart.parentUnit")) });
 				if (!part_aircraft_ref) return results;
 
 				int airfoil_id = find_prop<int>(ser_part, "airfoil");
@@ -440,8 +441,9 @@ namespace hexagonest.Validator
 				// this should be a fail but vanilla aircraft do it constantly
 				results.warn("AeroPart", "dragArea", find_prop<float>(ser_part, "dragArea") <= 0, "DragArea <= 0", go);
 				// validate the Ibis to see how much respect vanilla aircraft have for "rules" in this case
+				AudioClip bullet_impact = find_asset<AudioClip>("bulletImpact1_PLACEHOLDER");
 				results.info("AeroPart", "hitSound", find_prop<UnityEngine.Object>(ser_part, "hitSound") == null, "HitSound missing", go,
-					new List<Fix>{ new Fix($"Set default", () => Debug.Log("set AeroPart.hitSound")) });
+					new List<Fix>{ new Fix($"Set default (bulletImpact1_PLACEHOLDER)", () => ValidationUtils.update_field(aero_part, "hitSound", bullet_impact, "fix AeroPart.hitSound")) });
 
 				results.warn("AeroPart", "airfoil", airfoil_id > 0 && find_prop<float>(ser_part, "wingArea") == 0, $"Wing area 0 with airfoil id {airfoil_id}", go);
 			}
@@ -542,7 +544,7 @@ namespace hexagonest.Validator
 
 				bool turbine_aircraft_ref = ValidationUtils.check_reference(ser_turbine, "aircraft", aircraft_comp);
 				results.critical("TurbineEngine", "aircraft", !turbine_aircraft_ref, "Aircraft reference missing or wrong", turbine_go,
-					new List<Fix>{ new Fix($"Auto set", () => Debug.Log("set TurbineEngine.aircraft")) }); // TODO: Auto fix TurbineEngine.aircraft
+					new List<Fix>{ new Fix($"Auto set", () => ValidationUtils.update_field(turbine, "aircraft", aircraft_comp, "auto set TurbineEngine.aircraft")) });
 				if (!turbine_aircraft_ref) return results;
 
 				var ir_source = find_prop(ser_turbine, "IRSourceTransform");
@@ -575,10 +577,14 @@ namespace hexagonest.Validator
 				results.warn("TurbineEngine", "IRMax", ir_max < ir_min, "IRMax < IRMin", turbine_go);
 				results.fail("TurbineEngine", "criticalParts", find_prop(ser_turbine, "criticalParts").arraySize == 0, "missing CriticalParts (engine won't take damage)", turbine_go);
 				results.warn("TurbineEngine", "criticalDamageThreshold", find_prop<float>(ser_turbine, "criticalDamageThreshold") <= 0, "CriticalDamageThreshold <= 0", turbine_go);
-				results.warn("TurbineEngine", "failureTransform", find_prop<Transform>(ser_turbine, "failureTransform") == null, "missing FailureTransform", turbine_go);
-				results.warn("TurbineEngine", "failureEffect", find_prop<UnityEngine.Object>(ser_turbine, "failureEffect") == null, "missing FailureEffect", turbine_go);
-				results.warn("TurbineEngine", "failureMessage", find_prop<string>(ser_turbine, "failureMessage") == "", "missing FailureMessage", turbine_go);
-				results.warn("TurbineEngine", "failureMessageAudio", find_prop<UnityEngine.Object>(ser_turbine, "failureMessageAudio") == null, "missing FailureMessageAudio", turbine_go);
+				bool fail_transform = find_prop<Transform>(ser_turbine, "failureTransform") != null;
+				results.info("TurbineEngine", "failureTransform", !fail_transform, "missing FailureTransform", turbine_go);
+				bool fail_effect = find_prop<UnityEngine.Object>(ser_turbine, "failureEffect") != null;
+				results.info("TurbineEngine", "failureEffect", !fail_effect, "missing FailureEffect", turbine_go);
+				results.info("TurbineEngine", "failureMessage", find_prop<string>(ser_turbine, "failureMessage") == "", "missing FailureMessage", turbine_go);
+				results.info("TurbineEngine", "failureMessageAudio", find_prop<UnityEngine.Object>(ser_turbine, "failureMessageAudio") == null, "missing FailureMessageAudio", turbine_go);
+
+				results.fail("TurbineEngine", "criticalParts", fail_transform && (!fail_effect), "FailTransform present but missing FailEffect", turbine_go);
 
 				// TODO: Check same GameObject for Audio Source and verify AudioClip and Output
 			}
@@ -685,7 +691,7 @@ namespace hexagonest.Validator
 
 				bool gear_aircraft_ref = ValidationUtils.check_reference(ser_gear, "aircraft", aircraft_comp);
 				results.critical("LandingGear", "aircraft", !gear_aircraft_ref, "Aircraft reference missing or wrong", gear_go,
-					new List<Fix>{ new Fix($"Auto set", () => Debug.Log("set LandingGear.aircraft")) }); // TODO: Auto fix LandingGear.aircraft
+					new List<Fix>{ new Fix($"Auto set", () => ValidationUtils.update_field(gear, "aircraft", aircraft_comp, "auto set LandingGear.aircraft")) });
 				if (!gear_aircraft_ref) return results;
 
 				var attached_part = find_prop<Component>(ser_gear, "attachedPart");
@@ -768,17 +774,19 @@ namespace hexagonest.Validator
 				float gear_mass = find_prop<float>(ser_gear, "mass");
 				results.fail("LandingGear", "mass", gear_mass <= 0, "Mass <= 0", gear_go);
 				// TODO: gear_mass > attached_part.mass
+				AudioClip metal_tear = find_asset<AudioClip>("metal_tear1_PLACEHOLDER");
 				results.warn("LandingGear", "breakSound", find_prop<UnityEngine.Object>(ser_gear, "breakSound") == null, "missing BreakSound", gear_go,
-					new List<Fix>{ new Fix($"Set default", () => Debug.Log("set LandingGear.breakSound to default")) }); // TODO: LandingGear.breakSound => metal_tear1_PLACEHOLDER
-
+					new List<Fix>{ new Fix($"Set default (metal_tear1_PLACEHOLDER)", () => ValidationUtils.update_field(gear, "breakSound", metal_tear, "fix LandingGear.breakSound")) });
+				AudioClip fold_sound = find_asset<AudioClip>("gearfold_PLACEHOLDER");
 				results.warn("LandingGear", "foldSound", find_prop<UnityEngine.Object>(ser_gear, "foldSound") == null, "missing FoldSound", gear_go,
-					new List<Fix>{ new Fix($"Set default", () => Debug.Log("set LandingGear.foldSound to default")) }); // TODO: LandingGear.foldSound => gearfold_PLACEHOLDER
+					new List<Fix>{ new Fix($"Set default (gearfold_PLACEHOLDER)", () => ValidationUtils.update_field(gear, "foldSound", fold_sound, "fix LandingGear.foldSound")) });
 				results.warn("LandingGear", "foldVolume", find_prop<float>(ser_gear, "foldVolume") <= 0, "FoldVolume <= 0", gear_go,
-					new List<Fix>{ new Fix("Default (0.3)", () => Debug.Log("set LandingGear.foldVolume to 0.3")) }); // TODO: LandingGear.foldVolume => 0.3
+					new List<Fix>{ new Fix("Set default (0.3)", () => ValidationUtils.update_field(gear, "foldVolume", 0.3f, "fix LandingGear.foldVolume")) });
+				AudioClip latch_sound = find_asset<AudioClip>("latch1_PLACEHOLDER");
 				results.warn("LandingGear", "latchSound", find_prop<UnityEngine.Object>(ser_gear, "latchSound") == null, "missing LatchSound", gear_go,
-					new List<Fix>{ new Fix($"Set default", () => Debug.Log("set LandingGear.latchSound to default")) }); // TODO: LandingGear.foldSound => latch1_PLACEHOLDER
+					new List<Fix>{ new Fix($"Set default (latch1_PLACEHOLDER)", () => ValidationUtils.update_field(gear, "latchSound", latch_sound, "fix LandingGear.latchSound")) });
 				results.warn("LandingGear", "latchVolume", find_prop<float>(ser_gear, "latchVolume") <= 0, "LatchVolume <= 0", gear_go,
-					new List<Fix>{ new Fix("Default (0.3)", () => Debug.Log("set LandingGear.latchVolume to 0.3")) }); // TODO: LandingGear.foldVolume => 0.3
+					new List<Fix>{ new Fix("Set default (0.3)", () => ValidationUtils.update_field(gear, "latchVolume", 0.3f, "fix LandingGear.latchVolume")) });
 				results.fail("LandingGear", "foldDegrees", find_prop<float>(ser_gear, "foldDegrees") == 0, "FoldDegrees = 0", gear_go);
 				results.fail("LandingGear", "foldSpeed", find_prop<float>(ser_gear, "foldSpeed") <= 0, "FoldSpeed <= 0", gear_go);
 				Transform strut_rotation_transform = find_prop<Transform>(ser_gear, "strutRotationTransform"); // strut rotation is around the Y axis

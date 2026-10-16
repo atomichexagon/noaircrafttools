@@ -98,9 +98,9 @@ namespace hexagonest.Validator
 	{
 		public string name;
 		public bool used = false;
-		public Action action;
+		public Func<bool> action;
 
-		public Fix(string _name, Action _action)
+		public Fix(string _name, Func<bool> _action)
 		{
 			name = _name; action = _action;
 		}

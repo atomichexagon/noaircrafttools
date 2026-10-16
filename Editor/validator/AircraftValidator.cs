@@ -302,7 +302,8 @@ namespace hexagonest.Validator
 				foreach (Fix action in actions) {
 					using (new EditorGUI.DisabledScope(action.used)) {
 						if (GUILayout.Button(action.name, "minibutton", GUILayout.ExpandWidth(false), GUILayout.Height(EditorGUIUtility.singleLineHeight))) {
-							action.action();
+							bool success = action.action();
+							//if (success) validate_aircraft(aircraft_definition);
 							action.used = true;
 						}
 					}
@@ -323,6 +324,10 @@ namespace hexagonest.Validator
 			if (GUILayout.Button("Rebuild validators", EditorStyles.toolbarButton)) // rebuild aircraft data to accomodate changes
 			{
 				rebuild_validator_cache();
+			}
+			if (GUILayout.Button("Reset asset cache", EditorStyles.toolbarButton)) // rebuild asset cache
+			{
+				reset_asset_cache();
 			}
 			GUILayout.FlexibleSpace();
 			GUILayout.Label($"{sorted_validators.Count} validators loaded");

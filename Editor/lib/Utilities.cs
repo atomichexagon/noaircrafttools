@@ -883,6 +883,34 @@ namespace hexagonest.Tools
 		public static bool fuzzy_eq(float num1, float num2, float epsilon = 0.001f)
 			=> Mathf.Abs(num1 - num2) < epsilon;
 
+		
+		// not marked as readonly to facilitate cache wipes
+		static Dictionary<(Type, string), UnityEngine.Object> asset_cache = new();
+
+		public static void reset_asset_cache()
+		{
+			asset_cache = new();
+		}
+
+		public static T find_asset<T>(string name, string[] folders = null) where T : UnityEngine.Object
+		{
+			var key = (typeof(T), name);
+			if (asset_cache.TryGetValue(key, out var hit) && hit != null) return (T)hit;
+
+			T found = null;
+			foreach (var guid in AssetDatabase.FindAssets($"{name} t:{typeof(T).Name}", folders))
+			{
+				var path = AssetDatabase.GUIDToAssetPath(guid);
+				if (System.IO.Path.GetFileNameWithoutExtension(path) == name)
+				{
+					found = AssetDatabase.LoadAssetAtPath<T>(path);
+					break;
+				}
+			}
+			if (found != null) asset_cache[key] = found;
+			return found;
+		}
+
 
 		public static Transform get_child_or_make_empty(GameObject parent, string child_name)
 		{
