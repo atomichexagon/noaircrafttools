@@ -272,8 +272,63 @@ namespace hexagonest.Validator
 
 
 
+	[Requires(typeof(AircraftDefinitionValidator))]
 	[Requires(typeof(AircraftParametersValidator))]
 	[Requires(typeof(Prefab_AircraftRootValidator))]
+	class Prefab_AeroPartValidator : IValidator
+	{
+		public string Name => "AeroParts";
+		
+		public ValidatorResult evaluate(UnityEngine.Object aircraft_definition)
+		{
+			GameObject prefab = ValidationUtils.get_aircraft_root(aircraft_definition);
+			ValidatorResult results = new ValidatorResult(Name, prefab.transform);
+
+			using var ser_def = new SerializedObject(aircraft_definition);
+			var aircraft_parameters = find_prop<UnityEngine.Object>(ser_def, "aircraftParameters");
+			using var ser_params = new SerializedObject(aircraft_parameters);
+
+			var airfoils = find_prop(ser_params, "airfoils");
+			int num_airfoils = airfoils.arraySize;
+
+			Component aircraft_comp = prefab.GetComponent(game_type("Aircraft"));
+
+			foreach (Component aero_part in prefab.GetComponentsInChildren(game_type("AeroPart"), true))
+			{
+				GameObject go = aero_part.gameObject;
+				var ser_part = new SerializedObject(aero_part);
+
+				bool part_aircraft_ref = ValidationUtils.check_reference(ser_part, "parentUnit", aircraft_comp);
+				results.critical("AeroPart", "parentUnit", !part_aircraft_ref, "ParentUnit missing", go,
+					new List<Fix>{ new Fix($"Auto set", () => ValidationUtils.update_field(aero_part, "parentUnit", aircraft_comp, "auto set AeroPart.parentUnit")) });
+				if (!part_aircraft_ref) return results;
+
+				int airfoil_id = find_prop<int>(ser_part, "airfoil");
+				results.critical("AeroPart", "airfoil", airfoil_id >= num_airfoils, $"Airfoil index out of bounds ({airfoil_id}/{num_airfoils-1})", go);
+				if (airfoil_id >= num_airfoils) return results;
+
+				results.fail("AeroPart", "mass", find_prop<float>(ser_part, "mass") <= 0, "Mass <= 0", go);
+				results.fail("AeroPart", "wingArea", find_prop<float>(ser_part, "wingArea") < 0, "WingArea < 0", go); // zero is fine, <0?
+				// this should be a fail but vanilla aircraft do it constantly
+				results.warn("AeroPart", "dragArea", find_prop<float>(ser_part, "dragArea") <= 0, "DragArea <= 0", go);
+				// validate the Ibis to see how much respect vanilla aircraft have for "rules" in this case
+				AudioClip bullet_impact = find_asset<AudioClip>("bulletImpact1_PLACEHOLDER");
+				results.info("AeroPart", "hitSound", find_prop<UnityEngine.Object>(ser_part, "hitSound") == null, "HitSound missing", go,
+					new List<Fix>{ new Fix($"Set default (bulletImpact1_PLACEHOLDER)", () => ValidationUtils.update_field(aero_part, "hitSound", bullet_impact, "fix AeroPart.hitSound")) });
+
+				results.warn("AeroPart", "airfoil", airfoil_id > 0 && find_prop<float>(ser_part, "wingArea") == 0, $"Wing area 0 with airfoil id {airfoil_id}", go);
+			}
+
+			return results;
+		}
+	}
+
+
+
+
+	[Requires(typeof(AircraftParametersValidator))]
+	[Requires(typeof(Prefab_AircraftRootValidator))]
+	[Requires(typeof(Prefab_AeroPartValidator))]
 	class Prefab_WeaponManagerValidator : IValidator
 	{
 		public string Name => "WeaponManager";
@@ -392,60 +447,6 @@ namespace hexagonest.Validator
 					bool is_block_mutual = (does_set_proclude && set_precludes != null ? set_precludes.Contains(blocking_set) : false);
 					results.warn("WeaponManager", "hardpointSets", !is_block_mutual, $"Set {blocking_set} precludes set {blocked_set}, but {blocked_set} does not preclude {blocking_set}", wep_go);
 				}
-			}
-
-			return results;
-		}
-	}
-
-
-
-
-	[Requires(typeof(AircraftDefinitionValidator))]
-	[Requires(typeof(AircraftParametersValidator))]
-	[Requires(typeof(Prefab_AircraftRootValidator))]
-	class Prefab_AeroPartValidator : IValidator
-	{
-		public string Name => "AeroParts";
-		
-		public ValidatorResult evaluate(UnityEngine.Object aircraft_definition)
-		{
-			GameObject prefab = ValidationUtils.get_aircraft_root(aircraft_definition);
-			ValidatorResult results = new ValidatorResult(Name, prefab.transform);
-
-			using var ser_def = new SerializedObject(aircraft_definition);
-			var aircraft_parameters = find_prop<UnityEngine.Object>(ser_def, "aircraftParameters");
-			using var ser_params = new SerializedObject(aircraft_parameters);
-
-			var airfoils = find_prop(ser_params, "airfoils");
-			int num_airfoils = airfoils.arraySize;
-
-			Component aircraft_comp = prefab.GetComponent(game_type("Aircraft"));
-
-			foreach (Component aero_part in prefab.GetComponentsInChildren(game_type("AeroPart"), true))
-			{
-				GameObject go = aero_part.gameObject;
-				var ser_part = new SerializedObject(aero_part);
-
-				bool part_aircraft_ref = ValidationUtils.check_reference(ser_part, "parentUnit", aircraft_comp);
-				results.critical("AeroPart", "parentUnit", !part_aircraft_ref, "ParentUnit missing", go,
-					new List<Fix>{ new Fix($"Auto set", () => ValidationUtils.update_field(aero_part, "parentUnit", aircraft_comp, "auto set AeroPart.parentUnit")) });
-				if (!part_aircraft_ref) return results;
-
-				int airfoil_id = find_prop<int>(ser_part, "airfoil");
-				results.critical("AeroPart", "airfoil", airfoil_id >= num_airfoils, $"Airfoil index out of bounds ({airfoil_id}/{num_airfoils-1})", go);
-				if (airfoil_id >= num_airfoils) return results;
-
-				results.fail("AeroPart", "mass", find_prop<float>(ser_part, "mass") <= 0, "Mass <= 0", go);
-				results.fail("AeroPart", "wingArea", find_prop<float>(ser_part, "wingArea") < 0, "WingArea < 0", go); // zero is fine, <0?
-				// this should be a fail but vanilla aircraft do it constantly
-				results.warn("AeroPart", "dragArea", find_prop<float>(ser_part, "dragArea") <= 0, "DragArea <= 0", go);
-				// validate the Ibis to see how much respect vanilla aircraft have for "rules" in this case
-				AudioClip bullet_impact = find_asset<AudioClip>("bulletImpact1_PLACEHOLDER");
-				results.info("AeroPart", "hitSound", find_prop<UnityEngine.Object>(ser_part, "hitSound") == null, "HitSound missing", go,
-					new List<Fix>{ new Fix($"Set default (bulletImpact1_PLACEHOLDER)", () => ValidationUtils.update_field(aero_part, "hitSound", bullet_impact, "fix AeroPart.hitSound")) });
-
-				results.warn("AeroPart", "airfoil", airfoil_id > 0 && find_prop<float>(ser_part, "wingArea") == 0, $"Wing area 0 with airfoil id {airfoil_id}", go);
 			}
 
 			return results;
