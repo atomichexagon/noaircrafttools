@@ -102,7 +102,7 @@ namespace hexagonest.Validator
 
 			Component aircraft_comp = prefab.GetComponent(game_type("Aircraft"));
 			results.critical("", "", aircraft_comp == null, "missing Aircraft component on root", prefab);
-			// if (aircraft_comp == null) return results;
+			if (aircraft_comp == null) return results;
 
 			// Check aircraft component
 			var ser_aircraft = new SerializedObject(aircraft_comp);
@@ -110,17 +110,17 @@ namespace hexagonest.Validator
 			bool def_ref = ValidationUtils.check_reference(ser_aircraft, "definition", aircraft_definition);
 			results.critical("Aircraft", "definition", !def_ref, "Aircraft.Definition missing or wrong", prefab,
 				new List<Fix>{ new Fix($"Auto set", () => ValidationUtils.update_field(aircraft_comp, "definition", aircraft_definition, "auto set Aircraft.definition")) });
-			// if (!def_ref) return results;
+			if (!def_ref) return results;
 			
 			Component cockpit_part = find_prop<Component>(ser_aircraft, "cockpit");
 			results.critical("Aircraft", "cockpit", cockpit_part == null, "missing Aircraft.Cockpit", prefab);
-			// if (cockpit_part == null) return results;
+			if (cockpit_part == null) return results;
 
 			Component[] wm_comps = prefab.GetComponentsInChildren(game_type("WeaponManager"), true);
 			results.critical("", "", wm_comps.Length == 0, "no objects with WeaponManager component", prefab);
-			// if (wm_comps.Length == 0) return results;
+			if (wm_comps.Length == 0) return results;
 			results.critical("", "", wm_comps.Length > 1, "multiple objects with WeaponManager component", prefab);
-			// if (wm_comps.Length > 1) return results;
+			if (wm_comps.Length > 1) return results;
 
 			Component wm_comp = wm_comps[0];
 
@@ -128,7 +128,7 @@ namespace hexagonest.Validator
 			results.critical("Aircraft", "weaponManager", weapon_manager == null, "missing Aircraft.WeaponManager", prefab,
 				wm_comp != null ? new List<Fix>{ new Fix($"Auto set (found: {wm_comp.gameObject.name})",
 				() => ValidationUtils.update_field(aircraft_comp, "weaponManager", wm_comp, "auto set Aircraft.weaponManager")) } : null);
-			// if (weapon_manager == null) return results;
+			if (weapon_manager == null) return results;
 			
 			results.fail("Aircraft", "MapUniqueName", find_prop<string>(ser_aircraft, "MapUniqueName") != "", "MapUniqueName should be blank", prefab,
 				new List<Fix>{ new Fix("Clear field", () => ValidationUtils.update_field(aircraft_comp, "MapUniqueName", "", "fix Aircraft.MapUniqueName")) });
@@ -162,23 +162,23 @@ namespace hexagonest.Validator
 			// Check components on root
 			Component aero_part = prefab.GetComponent(game_type("AeroPart"));
 			results.critical("AeroPart", "", aero_part == null, "missing AeroPart component on root", prefab);
-			// if (aero_part == null) return results;
+			if (aero_part == null) return results;
 
 			Rigidbody rigidbody = prefab.GetComponent<Rigidbody>();
 			results.critical("", "", rigidbody == null, "missing Rigidbody on root", prefab);
-			// if (rigidbody == null) return results;
+			if (rigidbody == null) return results;
 
 			Collider[] colliders = prefab.GetComponents<Collider>();
 			results.critical("", "", colliders.Length == 0, "missing Collider (any type) on root", prefab);
-			// if (colliders.Length == 0) return results;
+			if (colliders.Length == 0) return results;
 
 			
 			// Cockpit
 			Component[] cockpit_comps = prefab.GetComponentsInChildren(game_type("Cockpit"), true);
 			results.critical("", "", cockpit_comps.Length == 0, "no objects with Cockpit component", prefab);
-			// if (cockpit_comps.Length == 0) return results;
+			if (cockpit_comps.Length == 0) return results;
 			results.critical("", "", cockpit_comps.Length > 1, "multiple objects with Cockpit component", prefab);
-			// if (cockpit_comps.Length > 1) return results;
+			if (cockpit_comps.Length > 1) return results;
 
 			Component cockpit_comp = cockpit_comps[0];
 
@@ -187,13 +187,13 @@ namespace hexagonest.Validator
 			bool cockpit_aircraft_ref = ValidationUtils.check_reference(ser_cockpit, "aircraft", aircraft_comp);
 			results.critical("Cockpit", "aircraft", !cockpit_aircraft_ref, "Cockpit.Aircraft missing or wrong", go_cockpit,
 				new List<Fix>{ new Fix($"Auto set", () => ValidationUtils.update_field(cockpit_comp, "aircraft", aircraft_comp, "auto set Cockpit.aircraft")) });
-			// if (!cockpit_aircraft_ref) return results;
+			if (!cockpit_aircraft_ref) return results;
 
 			// NetworkIdentity
 			string net_identity = "Mirage.NetworkIdentity";
 			Component network_identity = prefab.GetComponent(game_type(net_identity));
 			results.critical("", "", network_identity == null, "missing NetworkIdentity component on root", prefab);
-			// if (network_identity == null) return results;
+			if (network_identity == null) return results;
 
 			using var ser_net_ident = new SerializedObject(network_identity);
 			bool net_send_pos = find_prop<bool>(ser_net_ident, "SpawnSettings.SendPosition") != true;
@@ -222,13 +222,13 @@ namespace hexagonest.Validator
 			string net_transform = "NuclearOption.NetworkTransforms.AircraftNetworkTransform";
 			Component network_transform = prefab.GetComponent(game_type(net_transform));
 			results.critical("", "", network_transform == null, "missing AircraftNetworkTransform component on root", prefab);
-			// if (network_transform == null) return results;
+			if (network_transform == null) return results;
 
 			var ser_net = new SerializedObject(network_transform);
 			bool net_aircraft_ref = ValidationUtils.check_reference(ser_net, "Aircraft", aircraft_comp);
 			results.critical(net_transform, "Aircraft", !net_aircraft_ref, "AircraftNetworkTransform.Aircraft missing or wrong", prefab,
 				new List<Fix>{ new Fix($"Auto set", () => ValidationUtils.update_field(network_transform, "Aircraft", aircraft_comp, "auto set AircraftNetworkTransform.Aircraft")) });
-			// if (!net_aircraft_ref) return results;
+			if (!net_aircraft_ref) return results;
 
 			bool net_sync_from = !check_list(find_prop_enums(ser_net, "SyncSettings.From", game_type("Mirage.SyncFrom")), new List<string>{"Server"});
 			results.warn("AircraftNetworkTransform", "SyncSettings", net_sync_from, "AircraftNetworkTransform.SyncSettings.From should be left default (Server)", prefab);
