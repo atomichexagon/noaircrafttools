@@ -14,6 +14,7 @@ using static hexagonest.Tools.Utilities;
 
 namespace hexagonest.Validator
 {
+	// Author's note: I'm sorry in advance if you're good with C#. I imagine reading this will be a form of torture.
 	public class AircraftValidator : EditorWindow
 	{
 		private static UnityEngine.Object aircraft_definition = null;
