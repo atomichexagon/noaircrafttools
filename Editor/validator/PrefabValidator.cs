@@ -510,11 +510,113 @@ namespace hexagonest.Validator
 			GameObject prefab = ValidationUtils.get_aircraft_root(aircraft_definition);
 			ValidatorResult results = new ValidatorResult(Name, prefab.transform);
 
+			using var ser_def = new SerializedObject(aircraft_definition);
+			var aircraft_parameters = find_prop<UnityEngine.Object>(ser_def, "aircraftParameters");
+			using var ser_params = new SerializedObject(aircraft_parameters);
+
+			float default_fuel = find_prop<float>(ser_params, "DefaultFuelLevel");
+			string default_fuel_text = $"{(default_fuel*100):F2}%";
+
 			Component aircraft_comp = prefab.GetComponent(game_type("Aircraft"));
 
 			Component[] comps = prefab.GetComponentsInChildren(game_type("FuelTank"), true);
-			// results.info("", "", comps.Length > 0, $"[placeholder] {comps.Length} {Name} found");
 
+			float total_fuel_capacity = 0;
+
+			// effect defaults
+			GameObject fuel_leak = find_asset<GameObject>("fuelLeak_PLACEHOLDER");
+
+			GameObject fire_tiny = find_asset<GameObject>("fire_tiny_PLACEHOLDER");
+			GameObject fire_small = find_asset<GameObject>("fire_small_PLACEHOLDER");
+			GameObject fire_med = find_asset<GameObject>("fire_med_PLACEHOLDER");
+			GameObject fire_large = find_asset<GameObject>("fire_large_PLACEHOLDER");
+
+			GameObject fireball_med = find_asset<GameObject>("fireball_medium_PLACEHOLDER");
+			GameObject fireball_large = find_asset<GameObject>("fireball_large_PLACEHOLDER");
+
+
+			Dictionary<Component, List<Component>> tank_connections = new Dictionary<Component, List<Component>>();
+
+			foreach (Component tank in comps)
+			{
+				GameObject tank_go = tank.gameObject;
+				var ser_tank = new SerializedObject(tank);
+
+				Component aero_part = tank_go.GetComponent(game_type("AeroPart"));
+
+				Component current_part = find_prop<Component>(ser_tank, "part");
+				results.critical("FuelTank", "part", current_part == null, "Part reference missing", tank_go,
+					aero_part != null ? new List<Fix>{ new Fix($"Auto set (found: {aero_part.gameObject.name})",
+					() => ValidationUtils.update_field(tank, "part", aero_part, "auto set FuelTank.part")) } : null);
+				if (current_part == null) return results;
+
+				results.warn("FuelTank", "part", current_part != aero_part, "Part reference potentially wrong (not using part in same object)", tank_go,
+					new List<Fix>{ new Fix($"Auto set", () => ValidationUtils.update_field(tank, "part", aero_part, "auto set FuelTank.part")) });
+
+				float fuel_capacity = find_prop<float>(ser_tank, "fuelCapacity");
+				float fuel_mass = find_prop<float>(ser_tank, "fuelMass");
+
+				total_fuel_capacity += fuel_capacity;
+
+				results.warn("FuelTank", "fuelCapacity", fuel_capacity <= 0, "FuelCapacity <= 0", tank_go);
+				results.info("FuelTank", "fuelMass", !fuzzy_eq(fuel_mass, fuel_capacity * default_fuel), $"FuelMass not {default_fuel_text} of capacity (from params)", tank_go,
+					new List<Fix>{ new Fix($"Set to {default_fuel_text} fill", () => ValidationUtils.update_field(tank, "fuelMass", fuel_capacity * default_fuel, $"fill FuelTank.FuelMass to {default_fuel_text}")) });
+				results.warn("FuelTank", "fuelMass", fuel_mass > fuel_capacity, "FuelMass > FuelCapacity", tank_go);
+
+				var connected_tanks = find_prop(ser_tank, "connectedTanks");
+				List<Component> connected = new List<Component>();
+
+				for (int i = 0; i < connected_tanks.arraySize; i++)
+				{
+					Component other_tank = get_element<Component>(connected_tanks, i);
+					results.critical("FuelTank", $"connectedTanks.Array.data[{i}]", other_tank == null, $"Connected tank {i} is null", tank_go);
+					if (other_tank == null) return results;
+
+					connected.Add(other_tank);
+				}
+				tank_connections[tank] = connected;
+
+				results.info("FuelTank", "leakThreshold", find_prop<float>(ser_tank, "leakThreshold") <= 0, "LeakThreshold <= 0", tank_go);
+				results.info("FuelTank", "leakPerHP", find_prop<float>(ser_tank, "leakPerHP") <= 0, "LeakPerHP <= 0", tank_go);
+				results.info("FuelTank", "maxLeakRate", find_prop<float>(ser_tank, "maxLeakRate") <= 0, "MaxLeakRate <= 0", tank_go);
+				results.info("FuelTank", "ruptureGMin", find_prop<float>(ser_tank, "ruptureGMin") <= 0, "RuptureGMin <= 0", tank_go);
+				results.info("FuelTank", "ruptureGMax", find_prop<float>(ser_tank, "ruptureGMax") <= 0, "RuptureGMax <= 0", tank_go);
+				results.info("FuelTank", "ignitionGMin", find_prop<float>(ser_tank, "ignitionGMin") <= 0, "IgnitionGMin <= 0", tank_go);
+				results.info("FuelTank", "ignitionGMax", find_prop<float>(ser_tank, "ignitionGMax") <= 0, "IgnitionGMax <= 0", tank_go);
+				results.info("FuelTank", "ignitionPierceMin", find_prop<float>(ser_tank, "ignitionPierceMin") <= 0, "IgnitionPierceMin <= 0", tank_go);
+				results.info("FuelTank", "ignitionPierceMax", find_prop<float>(ser_tank, "ignitionPierceMax") <= 0, "IgnitionPierceMax <= 0", tank_go);
+				results.info("FuelTank", "ignitionBlastMin", find_prop<float>(ser_tank, "ignitionBlastMin") <= 0, "IgnitionBlastMin <= 0", tank_go);
+				results.info("FuelTank", "ignitionBlastMax", find_prop<float>(ser_tank, "ignitionBlastMax") <= 0, "IgnitionBlastMax <= 0", tank_go);
+				results.info("FuelTank", "fireIntensity", find_prop<float>(ser_tank, "fireIntensity") <= 0, "FireIntensity <= 0", tank_go);
+
+				// effects
+				results.fail("FuelTank", "leakEffect", find_prop<GameObject>(ser_tank, "leakEffect") == null, "missing LeakEffect", tank_go,
+					new List<Fix>{ new Fix("Set default (fuelLeak_PLACEHOLDER)", () => ValidationUtils.update_field(tank, "leakEffect", fuel_leak, "use fuelLeak_PLACEHOLDER for FuelTank.leakEffect")) });
+				results.fail("FuelTank", "fireEffect", find_prop<GameObject>(ser_tank, "fireEffect") == null, "missing FireEffect", tank_go,
+					new List<Fix>{
+						new Fix("fire_tiny", () => ValidationUtils.update_field(tank, "fireEffect", fire_tiny, "use fire_tiny_PLACEHOLDER for FuelTank.fireEffect")),
+						new Fix("fire_small", () => ValidationUtils.update_field(tank, "fireEffect", fire_small, "use fire_small_PLACEHOLDER for FuelTank.fireEffect")),
+						new Fix("fire_med", () => ValidationUtils.update_field(tank, "fireEffect", fire_med, "use fire_med_PLACEHOLDER for FuelTank.fireEffect")),
+						new Fix("fire_large", () => ValidationUtils.update_field(tank, "fireEffect", fire_large, "use fire_large_PLACEHOLDER for FuelTank.fireEffect"))
+					});
+				results.info("FuelTank", "fireball", find_prop<GameObject>(ser_tank, "fireball") == null, "missing Fireball", tank_go,
+					new List<Fix>{
+						new Fix("fireball_med", () => ValidationUtils.update_field(tank, "fireball", fireball_med, "use fireball_med_PLACEHOLDER for FuelTank.fireball")),
+						new Fix("fireball_large", () => ValidationUtils.update_field(tank, "fireball", fireball_large, "use fireball_large_PLACEHOLDER for FuelTank.fireball"))
+					});
+			}
+
+			foreach (var (origin_tank, connected_tanks) in tank_connections)
+			{
+				foreach (var connected_tank in connected_tanks)
+				{
+					bool connected_has_connections = tank_connections.TryGetValue(connected_tank, out var other_tank_connections);
+					bool is_connection_mutual = (connected_has_connections && other_tank_connections != null ? other_tank_connections.Contains(origin_tank) : false);
+					results.info("FuelTank", "connectedTanks", !is_connection_mutual, $"Tank {origin_tank.gameObject.name} connects to {connected_tank.gameObject.name}, but connection is not mutual (this is fine if the second tank cannot break off before the first one, e.g. wing tank->center tank)", connected_tank.gameObject);
+				}
+			}
+
+			results.fail("", "", total_fuel_capacity <= 0, "Aircraft fuel capacity <= 0");
 			return results;
 		}
 	}
