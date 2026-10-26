@@ -957,6 +957,7 @@ namespace hexagonest.Validator
 				num_total += 1;
 			}
 
+			results.info("LandingGear", "", num_total == 0, "No landing gear (ignore if intended)");
 			results.warn("LandingGear", "", num_total > 0 && num_steering == 0 && num_brake_steering == 0, "No steering wheels");
 			results.info("LandingGear", "", num_total > 0 && num_steering == 0 && num_brake_steering > 0, "No steering wheels (steering brakes present)");
 			results.warn("LandingGear", "", num_total > 0 && num_braked == 0, "No braked wheels");
