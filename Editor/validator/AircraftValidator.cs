@@ -346,8 +346,8 @@ namespace hexagonest.Validator
 			EditorGUILayout.EndVertical();
 
 			EditorGUILayout.BeginVertical("GroupBox", GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
-			scroll = EditorGUILayout.BeginScrollView(scroll);
 			draw_row("Validator", Status.pass, null, "Message", null, "Status", "Context", "Actions");
+			scroll = EditorGUILayout.BeginScrollView(scroll);
 			if (sorted_results.Count == 0)
 			{
 				EditorGUILayout.BeginHorizontal();
