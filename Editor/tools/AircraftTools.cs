@@ -20,8 +20,8 @@ namespace hexagonest.Tools
 			GameObject results_object = Utilities.get_child_or_make_empty(prefab_root, "sim_results").gameObject;
 
 			Utilities.place_reference_empty(results_object, "dry_cg", physics.dry_cg);
-			Utilities.place_reference_empty(results_object, "fuel_cg", physics.max_fuel_cg);
-			Utilities.place_reference_empty(results_object, "wet_cg", wet_cg);
+			if (physics.max_fuel_mass > 0) Utilities.place_reference_empty(results_object, "fuel_cg", physics.max_fuel_cg);
+			if(physics.max_fuel_mass > 0) Utilities.place_reference_empty(results_object, "wet_cg", wet_cg);
 		}
 	}
 }
