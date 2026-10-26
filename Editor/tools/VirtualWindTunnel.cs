@@ -194,7 +194,7 @@ namespace hexagonest.Tools
 
 			if (aircraft_root != prefab_used) current_container = aircraft_root.transform.parent.gameObject;
 
-			fuel_level = current_aircraft.fuel_fraction;
+			fuel_level = current_aircraft.fuel_fraction * 100f;
 
 			tunnel_collision_check = false;
 		}
