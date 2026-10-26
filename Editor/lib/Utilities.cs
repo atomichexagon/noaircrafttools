@@ -883,6 +883,14 @@ namespace hexagonest.Tools
 		public static bool fuzzy_eq(float num1, float num2, float epsilon = 0.001f)
 			=> Mathf.Abs(num1 - num2) < epsilon;
 
+
+		public static float project_signed_angle(Vector3 vec1, Vector3 vec2, Vector3 axis)
+			=> Vector3.SignedAngle(
+					Vector3.ProjectOnPlane(vec1, axis).normalized,
+					Vector3.ProjectOnPlane(vec2, axis).normalized,
+					axis
+				);
+
 		
 		// not marked as readonly to facilitate cache wipes
 		static Dictionary<(Type, string), UnityEngine.Object> asset_cache = new();

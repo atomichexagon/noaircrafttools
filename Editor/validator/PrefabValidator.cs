@@ -935,7 +935,7 @@ namespace hexagonest.Validator
 				bool axle_right = Vector3.Dot(axle.right, gear_transform.right) > 0;
 				results.warn("", "", !axle_right, "Axle right (X) is backwards", axle);
 				
-				float axle_forward_angle = Vector3.SignedAngle(axle.forward, gear_transform.forward, gear_transform.up);
+				float axle_forward_angle = project_signed_angle(axle.forward, gear_transform.forward, gear_transform.up);
 				results.warn("", "", axle_forward && axle_forward_angle > alignment_precise, $"Axle forwards misaligned ({axle_forward_angle:F2}°) left/right", axle);
 				// float axle_up_angle = Vector3.SignedAngle(axle.up, gear_transform.up, gear_transform.right);
 				// results.warn("", "", axle_up && axle_up_angle > alignment_meh, $"Axle up misaligned ({axle_up_angle:F2}°) forwards/backwards", axle);
@@ -950,7 +950,7 @@ namespace hexagonest.Validator
 				for (int i = 0; i < wheel_array.arraySize; i++)
 				{
 					Transform wheel = get_element<Transform>(wheel_array, i);
-					float wheel_angle = Vector3.SignedAngle(wheel.right, axle.right, Vector3.up);
+					float wheel_angle = project_signed_angle(wheel.right, axle.right, Vector3.up);
 					results.warn("", "", wheel_angle > alignment_precise, $"Wheel {i} misaligned ({wheel_angle:F2}°) left/right", wheel.gameObject);
 				}
 				
