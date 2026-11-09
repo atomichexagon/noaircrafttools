@@ -39,7 +39,7 @@ namespace hexagonest.Tools
 
 		// TODO: investigate possibility of refactoring things to move mode-specific functionality into WindTunnelMode
 		// using before_sim_step and sim_step to allow for more complex simulations without bloating run_simulation()
-		// maybe overkill, but it'd also allow others (that's you) to more easily expand functionality to fit their use cases
+		// maybe overkill, but it'd also allow others (that's you (probably)) to more easily expand functionality to fit their use cases
 		// and the goal is for this tool to be useful so.. may as well
 
 		public class WindTunnelMode
