@@ -46,50 +46,62 @@ namespace hexagonest.Tools
 		{
 			public string sim_type, name, description;
 			public bool controls_enabled; // aircraft controls
+			public bool allow_auto; // auto run (for some reason it gets stuck sometimes)
 			public HashSet<string> parameters_shown; // shows fixed values
 
 			public string[] sweep_params; // available sweep modes
-			public int current_sweep;
+			public int current_sweep = 0;
 			public string sweep_param; // currently selected
 
 			//public delegate AircraftState before_sim_step();
 			//public string[] channels;
 
 			//public delegate SimResults sim_step(); // must replace Simulation.aircraft_forces() call
-		
-			public WindTunnelMode(string _sim_type, string _name, string _description, bool _controls_enabled, string[] _parameters_shown,
-				string[] _sweep_params)
+
+			public void init()
 			{
-				sim_type = _sim_type; name = _name; description = _description; controls_enabled = _controls_enabled;
-				parameters_shown = new HashSet<string>(_parameters_shown);
-				sweep_params = _sweep_params;
-				current_sweep = 0; sweep_param = sweep_params[0];
+				sweep_param = sweep_params[current_sweep];
 			}
 		}
 
 		// TODO: show descriptions somewhere
+		// TODO: maybe take inspiration from the Validator classes (and auto-finding defined validators) to split these off
+		// which would also let them have more complex behavior without polluting run_simulation with giant switches
 		static WindTunnelMode[] modes_available = new WindTunnelMode[] {
-			new WindTunnelMode ( "force_sweep", "Forces",
-				"Evaluates forces on the aircraft through the selected sweep range.",
-				true, new string[] { "airspeed", "altitude", "alpha", "beta" }, new string[] { "alpha", "beta", "airspeed" }
-			),
-			new WindTunnelMode ( "trim_sweep", "Trim finder",
-				"In alpha sweep mode, finds the trim setting where pitch torque is zero."
+			new WindTunnelMode { sim_type = "force_sweep", name = "Forces",
+				description = "Evaluates forces on the aircraft through the selected sweep range.",
+				controls_enabled = true, allow_auto = true,
+				parameters_shown = new HashSet<string>{ "airspeed", "altitude", "alpha", "beta" },
+				sweep_params = new string[] { "alpha", "beta", "airspeed" }
+			},
+			new WindTunnelMode { sim_type = "trim_sweep", name = "Trim finder",
+				description = "In alpha sweep mode, finds the trim setting where pitch torque is zero."
 				+ "\nIn airspeed sweep mode, finds the required alpha to maintain 1G, and then finds the trim setting to zero out pitch torque.",
-				true, new string[] { "airspeed", "altitude", "beta" }, new string[] { "alpha", "airspeed" }
-			),
-			new WindTunnelMode ( "deflection_sweep", "Control authority",
-				"Evaluates forces on the aircraft across the selected control's full range.",
-				true, new string[] { "airspeed", "altitude", "alpha", "beta" }, new string[] { "pitch", "roll", "yaw" }
-			),
-			new WindTunnelMode ( "stability_index", "Stability index",
-				"Evaluates stability index across alpha range",
-				true, new string[] { "airspeed", "altitude", "alpha", "beta" }, new string[] { "alpha" }
-			),
-			new WindTunnelMode ( "visualizer", "Visualizer", // TODO: make this its own tool?
-				"Visualize forces acting on the aircraft. Does not run simulations.",
-				true, new string[] { "airspeed", "altitude", "alpha", "beta" }, new string[] { "visualizer" }
-			),
+				controls_enabled = false, allow_auto = false, // this one takes a while so disabling auto is best
+				parameters_shown = new HashSet<string>{ "airspeed", "altitude", "beta" },
+				sweep_params = new string[] { "alpha", "airspeed" }
+			},
+			new WindTunnelMode { sim_type = "deflection_sweep", name = "Control authority",
+				description = "In alpha sweep mode, finds the trim setting where pitch torque is zero."
+				+ "\nIn airspeed sweep mode, finds the required alpha to maintain 1G, and then finds the trim setting to zero out pitch torque.",
+				controls_enabled = true, allow_auto = true,
+				parameters_shown = new HashSet<string>{ "airspeed", "altitude", "alpha", "beta" },
+				sweep_params = new string[] { "pitch", "roll", "yaw" }
+			},
+			// doesn't actually work (extremely lazy implementation and i don't wanna fix it for now)
+			// TODO: fix this
+			// new WindTunnelMode { sim_type = "stability_index", name = "Stability index",
+			// 	description = "Evaluates stability index across alpha range",
+			// 	controls_enabled = true, allow_auto = true,
+			// 	parameters_shown = new HashSet<string>{ "airspeed", "altitude", "alpha", "beta" },
+			// 	sweep_params = new string[] { "alpha" }
+			// },
+			new WindTunnelMode { sim_type = "visualizer", name = "Visualizer",
+				description = "Visualize forces acting on the aircraft. Does not run simulations.",
+				controls_enabled = true, allow_auto = true,
+				parameters_shown = new HashSet<string>{ "airspeed", "altitude", "alpha", "beta" },
+				sweep_params = new string[] { "visualizer" }
+			},
 		};
 
 		static GUIContent[] mode_names = modes_available.Select(mode => new GUIContent(mode.name, mode.description)).ToArray();
@@ -455,7 +467,9 @@ namespace hexagonest.Tools
 				else update_queued = true;
 			}
 
-			if (!simulating && simulate_on_change && (params_changed || was_updating))
+			// TODO: fix simulate_on_change
+			// sometimes this just runs constantly for no reason after changing any control, especially after e.g. updating fuel/control inputs
+			if (!simulating && (simulate_on_change && current_mode.allow_auto) && (params_changed || was_updating))
 			{
 				run_simulation();
 			}
