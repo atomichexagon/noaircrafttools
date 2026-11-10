@@ -58,9 +58,10 @@ namespace NOAircraftTools
 
 			//public delegate SimResults sim_step(); // must replace Simulation.aircraft_forces() call
 
-			public void init()
+			public WindTunnelMode init()
 			{
 				sweep_param = sweep_params[current_sweep];
+				return this;
 			}
 		}
 
@@ -73,21 +74,21 @@ namespace NOAircraftTools
 				controls_enabled = true, allow_auto = true,
 				parameters_shown = new HashSet<string>{ "airspeed", "altitude", "alpha", "beta" },
 				sweep_params = new string[] { "alpha", "beta", "airspeed" }
-			},
+			}.init(),
 			new WindTunnelMode { sim_type = "trim_sweep", name = "Trim finder",
 				description = "In alpha sweep mode, finds the trim setting where pitch torque is zero."
 				+ "\nIn airspeed sweep mode, finds the required alpha to maintain 1G, and then finds the trim setting to zero out pitch torque.",
 				controls_enabled = false, allow_auto = false, // this one takes a while so disabling auto is best
 				parameters_shown = new HashSet<string>{ "airspeed", "altitude", "beta" },
 				sweep_params = new string[] { "alpha", "airspeed" }
-			},
+			}.init(),
 			new WindTunnelMode { sim_type = "deflection_sweep", name = "Control authority",
 				description = "In alpha sweep mode, finds the trim setting where pitch torque is zero."
 				+ "\nIn airspeed sweep mode, finds the required alpha to maintain 1G, and then finds the trim setting to zero out pitch torque.",
 				controls_enabled = true, allow_auto = true,
 				parameters_shown = new HashSet<string>{ "airspeed", "altitude", "alpha", "beta" },
 				sweep_params = new string[] { "pitch", "roll", "yaw" }
-			},
+			}.init(),
 			// doesn't actually work (extremely lazy implementation and i don't wanna fix it for now)
 			// TODO: fix this
 			// new WindTunnelMode { sim_type = "stability_index", name = "Stability index",
@@ -95,13 +96,13 @@ namespace NOAircraftTools
 			// 	controls_enabled = true, allow_auto = true,
 			// 	parameters_shown = new HashSet<string>{ "airspeed", "altitude", "alpha", "beta" },
 			// 	sweep_params = new string[] { "alpha" }
-			// },
+			// }.init(),
 			new WindTunnelMode { sim_type = "visualizer", name = "Visualizer",
 				description = "Visualize forces acting on the aircraft. Does not run simulations.",
 				controls_enabled = true, allow_auto = true,
 				parameters_shown = new HashSet<string>{ "airspeed", "altitude", "alpha", "beta" },
 				sweep_params = new string[] { "visualizer" }
-			},
+			}.init(),
 		};
 
 		static GUIContent[] mode_names = modes_available.Select(mode => new GUIContent(mode.name, mode.description)).ToArray();
@@ -268,6 +269,9 @@ namespace NOAircraftTools
 						value_changed = true;
 					}
 					EditorGUILayout.EndHorizontal();
+
+					EditorGUILayout.LabelField("Hardpoints don't affect aircraft currently");
+					// TODO: Make hardpoints affect aircraft
 
 					foreach (HardpointGroup group in aircraft.hardpoint_manager.hardpoint_groups)
 					{
