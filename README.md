@@ -51,8 +51,8 @@ This tool can show you how your aircraft will perform in-game in various differe
 I haven't yet written documentation on what each mode actually means yet, but here's a short version:
 - Torque series
 	- Positive pitch torque means the aircraft wants to pitch down
-	- Positive roll torque means the aircraft wants to roll right
-	- Positive yaw torque means the aircraft wants to yaw left
+	- Positive roll torque means the aircraft wants to roll left
+	- Positive yaw torque means the aircraft wants to yaw right
 - Coefficients
 	- Cl is coefficient of lift
 	- Cd is coefficient of drag (might be off currently)
