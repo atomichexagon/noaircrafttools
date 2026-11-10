@@ -456,6 +456,7 @@ namespace NOAircraftTools.Validator
 
 
 
+	// TODO: HighLiftDevice validation
 	[Requires(typeof(Prefab_AeroPartValidator))]
 	class Prefab_HighLiftDeviceValidator : IValidator
 	{
@@ -478,24 +479,25 @@ namespace NOAircraftTools.Validator
 
 
 
-	[Requires(typeof(Prefab_AeroPartValidator))]
-	class Prefab_ControlSurfaceValidator : IValidator
-	{
-		public string Name => "ControlSurface";
+	// TODO: ControlSurface validation
+	// [Requires(typeof(Prefab_AeroPartValidator))]
+	// class Prefab_ControlSurfaceValidator : IValidator
+	// {
+	// 	public string Name => "ControlSurface";
 
-		public ValidatorResult evaluate(UnityEngine.Object aircraft_definition)
-		{
-			GameObject prefab = ValidationUtils.get_aircraft_root(aircraft_definition);
-			ValidatorResult results = new ValidatorResult(Name, prefab.transform);
+	// 	public ValidatorResult evaluate(UnityEngine.Object aircraft_definition)
+	// 	{
+	// 		GameObject prefab = ValidationUtils.get_aircraft_root(aircraft_definition);
+	// 		ValidatorResult results = new ValidatorResult(Name, prefab.transform);
 
-			Component aircraft_comp = prefab.GetComponent(game_type("Aircraft"));
+	// 		Component aircraft_comp = prefab.GetComponent(game_type("Aircraft"));
 
-			Component[] comps = prefab.GetComponentsInChildren(game_type("ControlSurface"), true);
-			// results.info("", "", comps.Length > 0, $"[placeholder] {comps.Length} {Name} found");
+	// 		Component[] comps = prefab.GetComponentsInChildren(game_type("ControlSurface"), true);
+	// 		// results.info("", "", comps.Length > 0, $"[placeholder] {comps.Length} {Name} found");
 
-			return results;
-		}
-	}
+	// 		return results;
+	// 	}
+	// }
 
 
 
@@ -747,25 +749,25 @@ namespace NOAircraftTools.Validator
 
 
 
-	[Requires(typeof(Prefab_TransmissionValidator))]
-	class Prefab_ConstantSpeedPropValidator : IValidator
-	{
-		public string Name => "ConstantSpeedProp";
+	// TODO: ConstantSpeedProp validation
+	// [Requires(typeof(Prefab_TransmissionValidator))]
+	// class Prefab_ConstantSpeedPropValidator : IValidator
+	// {
+	// 	public string Name => "ConstantSpeedProp";
 
-		public ValidatorResult evaluate(UnityEngine.Object aircraft_definition)
-		{
-			GameObject prefab = ValidationUtils.get_aircraft_root(aircraft_definition);
-			ValidatorResult results = new ValidatorResult(Name, prefab.transform);
-			Component aircraft_comp = prefab.GetComponent(game_type("Aircraft"));
+	// 	public ValidatorResult evaluate(UnityEngine.Object aircraft_definition)
+	// 	{
+	// 		GameObject prefab = ValidationUtils.get_aircraft_root(aircraft_definition);
+	// 		ValidatorResult results = new ValidatorResult(Name, prefab.transform);
+	// 		Component aircraft_comp = prefab.GetComponent(game_type("Aircraft"));
 
-			Component[] comps = prefab.GetComponentsInChildren(game_type("ConstantSpeedProp"), true);
-			// results.info("", "", comps.Length > 0, $"[placeholder] {comps.Length} {Name} found");
+	// 		Component[] comps = prefab.GetComponentsInChildren(game_type("ConstantSpeedProp"), true);
+	// 		// results.info("", "", comps.Length > 0, $"[placeholder] {comps.Length} {Name} found");
 
-			// TODO: This
 
-			return results;
-		}
-	}
+	// 		return results;
+	// 	}
+	// }
 
 
 
