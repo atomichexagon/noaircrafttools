@@ -84,7 +84,7 @@ should be able to explain what you changed and why. Poorly explained or overly b
 
 
 ## License
-MIT, see [License](License)
+MIT, see [License](LICENSE)
 
 
 ## Credits
