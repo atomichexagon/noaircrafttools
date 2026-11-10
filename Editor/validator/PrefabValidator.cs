@@ -457,24 +457,24 @@ namespace NOAircraftTools.Validator
 
 
 	// TODO: HighLiftDevice validation
-	[Requires(typeof(Prefab_AeroPartValidator))]
-	class Prefab_HighLiftDeviceValidator : IValidator
-	{
-		public string Name => "HighLiftDevice";
+	// [Requires(typeof(Prefab_AeroPartValidator))]
+	// class Prefab_HighLiftDeviceValidator : IValidator
+	// {
+	// 	public string Name => "HighLiftDevice";
 
-		public ValidatorResult evaluate(UnityEngine.Object aircraft_definition)
-		{
-			GameObject prefab = ValidationUtils.get_aircraft_root(aircraft_definition);
-			ValidatorResult results = new ValidatorResult(Name, prefab.transform);
+	// 	public ValidatorResult evaluate(UnityEngine.Object aircraft_definition)
+	// 	{
+	// 		GameObject prefab = ValidationUtils.get_aircraft_root(aircraft_definition);
+	// 		ValidatorResult results = new ValidatorResult(Name, prefab.transform);
 
-			Component aircraft_comp = prefab.GetComponent(game_type("Aircraft"));
+	// 		Component aircraft_comp = prefab.GetComponent(game_type("Aircraft"));
 
-			Component[] comps = prefab.GetComponentsInChildren(game_type("HighLiftDevice"), true);
-			// results.info("", "", comps.Length > 0, $"[placeholder] {comps.Length} {Name} found");
+	// 		Component[] comps = prefab.GetComponentsInChildren(game_type("HighLiftDevice"), true);
+	// 		// results.info("", "", comps.Length > 0, $"[placeholder] {comps.Length} {Name} found");
 
-			return results;
-		}
-	}
+	// 		return results;
+	// 	}
+	// }
 
 
 
