@@ -15,3 +15,5 @@ I would apologize in advance for the code you're about to read, but I wouldn't m
 ## Extending the validator
 Add a class implementing 'IValidator' and mark dependencies (e.g. AircraftDefinitionValidator) with '[Requires(typeof(OtherValidator))]'.
 Validators should be automatically discovered as long as they're in the right namespace.
+
+Refer to other validators (such as those in [PrefabValidator](PrefabValidator.cs)) to see how to set up the expected results object.

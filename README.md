@@ -60,3 +60,12 @@ I haven't yet written documentation on what each mode actually means yet, but he
 Known issues:
 - Causing a domain reload while in the Visualizer (wind tunnel only) can leave
 	the aircraft model rotated. Reset and Rebuild to fix. Doesn't affect the original prefab.
+
+## Credits
+- [Nuclear Option](https://store.steampowered.com/app/2168680/Nuclear_Option/) by Shockfront Studios
+- [Blueprinter](https://github.com/nikkorap/NOBlueprinter-Editor) by Nikkorap
+
+[License](LICENSE): MIT
+
+
+*This project is an unofficial community modification and is not affiliated with, sponsored by, or endorsed by Shockfront Studios Pty Ltd. Nuclear Option and Shockfront Studios are trademarks or registered trademarks of Shockfront Studios Pty Ltd.*
