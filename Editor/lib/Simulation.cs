@@ -6,10 +6,10 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using System;
 
-using static hexagonest.Tools.Utilities;
+using static NOAircraftTools.Utilities;
 
 
-namespace hexagonest.Tools
+namespace NOAircraftTools
 {
 	public static class Simulation
 	{
@@ -378,7 +378,7 @@ namespace hexagonest.Tools
 
 	public static class SimEnvironment
 	{
-		const string sim_scene_path = "Assets/_hex/Editor/Simulator.unity";
+		const string sim_scene_path = "Assets/NOAircraftTools_Simulator.unity";
 		const string container_name = "aircraft_root";
 		const string container_scene_path = "/aircraft_root";
 

@@ -8,11 +8,11 @@ using UnityEditor;
 using UnityEditor.Search;
 using UnityEditor.SceneManagement;
 
-using hexagonest.Tools;
-using static hexagonest.Tools.Utilities;
+using NOAircraftTools;
+using static NOAircraftTools.Utilities;
 
 
-namespace hexagonest.Validator
+namespace NOAircraftTools.Validator
 {
 	// Author's note: I'm sorry in advance if you're good with C#. I imagine reading this will be a form of torture.
 	public class AircraftValidator : EditorWindow
@@ -61,7 +61,7 @@ namespace hexagonest.Validator
 		}
 
 
-		[MenuItem("HexTools/Check aircraft")]
+		[MenuItem("NOAircraftTools/Check aircraft")]
 		public static void open_gui()
 		{
 			var window = EditorWindow.GetWindow<AircraftValidator>("Aircraft validator");

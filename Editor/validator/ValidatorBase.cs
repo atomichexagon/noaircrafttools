@@ -6,11 +6,11 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 
-using hexagonest.Tools;
-using static hexagonest.Tools.Utilities;
+using NOAircraftTools;
+using static NOAircraftTools.Utilities;
 
 
-namespace hexagonest.Validator
+namespace NOAircraftTools.Validator
 {
 	internal enum Status { skipped, pass, info, warn, fail, critical }
 

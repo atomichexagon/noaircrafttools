@@ -7,11 +7,11 @@ using UnityEngine;
 using UnityEngine.AddressableAssets;
 using UnityEditor;
 
-using hexagonest.Tools;
-using static hexagonest.Tools.Utilities;
+using NOAircraftTools;
+using static NOAircraftTools.Utilities;
 
 
-namespace hexagonest.Validator
+namespace NOAircraftTools.Validator
 {
 	class AircraftDefinitionValidator : IValidator
 	{
@@ -120,6 +120,7 @@ namespace hexagonest.Validator
 			//if (std_loadouts.arraySize < 1) return results;
 			
 			// liveries
+			// TODO: Check addressable
 			var liveries = find_prop(ser_params, "liveries");
 			results.critical("", "liveries", liveries.arraySize < 1, "must have at least 1 Livery", aircraft_parameters);
 			if (liveries.arraySize < 1) return results;

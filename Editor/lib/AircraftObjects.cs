@@ -4,10 +4,10 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-using static hexagonest.Tools.Utilities;
+using static NOAircraftTools.Utilities;
 
 
-namespace hexagonest.Tools
+namespace NOAircraftTools
 {
 	// input simulator
 	[Serializable] public class ControlInputs
@@ -27,6 +27,9 @@ namespace hexagonest.Tools
 		public ControlInputs set_brake(float new_brake) => set(inputs => inputs.brake = new_brake);
 		public ControlInputs set_axis1(float new_axis1) => set(inputs => inputs.custom_axis1 = new_axis1);
 	}
+
+	// TODO: Restructure this, maybe similar to how the Validator works to automatically pull in Simulated classes
+	// This would allow modders using custom behavior to simulate their shenanigans (e.g. wing folding) in the wind tunnel
 
 	// for objects wearing a context hat
 	[Serializable] public class AircraftState

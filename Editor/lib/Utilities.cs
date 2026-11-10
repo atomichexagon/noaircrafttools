@@ -7,10 +7,10 @@ using UnityEditor;
 using UnityEditorInternal;
 using UnityEditor.SceneManagement;
 
-using static hexagonest.Tools.Utilities;
+using static NOAircraftTools.Utilities;
 
 
-namespace hexagonest.Tools
+namespace NOAircraftTools
 {
 	// constants
 	public static class Constants {

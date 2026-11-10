@@ -9,11 +9,11 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEditorInternal;
 
-using hexagonest.Tools;
-using static hexagonest.Tools.Utilities;
+using NOAircraftTools;
+using static NOAircraftTools.Utilities;
 
 
-namespace hexagonest.Validator
+namespace NOAircraftTools.Validator
 {
 	internal static class ValidationUtils
 	{
@@ -760,6 +760,8 @@ namespace hexagonest.Validator
 
 			Component[] comps = prefab.GetComponentsInChildren(game_type("ConstantSpeedProp"), true);
 			// results.info("", "", comps.Length > 0, $"[placeholder] {comps.Length} {Name} found");
+
+			// TODO: This
 
 			return results;
 		}

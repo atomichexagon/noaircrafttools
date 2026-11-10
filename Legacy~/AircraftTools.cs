@@ -5,11 +5,12 @@ using UnityEngine;
 using UnityEditor;
 
 
-namespace hexagonest.Tools
+namespace NOAircraftTools
 {
+	// TODO: Rework this to show these in a window instead of placing empties
 	public class AircraftTools : EditorWindow
 	{
-		[MenuItem("HexTools/Calculate CG")]
+		[MenuItem("NOAircraftTools/Calculate CG")]
 		public static void calculate_cg()
 		{
 			GameObject prefab_root = SimEnvironment.check_in_prefab("Calculate CG"); if (prefab_root == null) return;

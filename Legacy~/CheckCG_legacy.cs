@@ -8,11 +8,11 @@ using UnityEditor.SceneManagement;
 //using Utilities.AircraftUtils;
 
 
-namespace hexagonest.Tools
+namespace NOAircraftTools
 {
 	public class BlueprinterCheckCG : EditorWindow
 	{
-//		[MenuItem("HexTools/Calculate CG")]
+//		[MenuItem("NOAircraftTools/Calculate CG")]
 //		public static void calculate_cg()
 //		{
 //			var stage = PrefabStageUtility.GetCurrentPrefabStage();

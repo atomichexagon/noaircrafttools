@@ -6,10 +6,10 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor;
 
-using static hexagonest.Tools.Utilities;
+using static NOAircraftTools.Utilities;
 
 
-namespace hexagonest.Tools
+namespace NOAircraftTools
 {
 	public static class AircraftSelector
 	{

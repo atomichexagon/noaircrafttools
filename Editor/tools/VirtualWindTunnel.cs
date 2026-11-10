@@ -7,10 +7,10 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using UnityEditor;
 
-using static hexagonest.Tools.Utilities;
+using static NOAircraftTools.Utilities;
 
 
-namespace hexagonest.Tools
+namespace NOAircraftTools
 {
 	// used by AircraftSelector
 	public class WindTunnel_Target : AircraftSelector.Target
@@ -219,7 +219,7 @@ namespace hexagonest.Tools
 			has_results = false;
 		}
 
-		[MenuItem("HexTools/Wind tunnel")]
+		[MenuItem("NOAircraftTools/Wind tunnel")]
 		static void open()
 		{
 			AircraftSelector.open_with_target(WindTunnel_Target.instance);
@@ -732,18 +732,18 @@ namespace hexagonest.Tools
 			simulating = false;
 		}
 
-		[MenuItem("HexTools/Stability test")]
-		private static void stability_test()
-		{
-			GameObject prefab_root = SimEnvironment.check_in_prefab("Stability test"); if (prefab_root == null) return;
-			AircraftData aircraft = AircraftUtils.get_data_from_prefab(prefab_root); AircraftPhysics physics = aircraft.physics;
+		// [MenuItem("NOAircraftTools/Stability test")]
+		// private static void stability_test()
+		// {
+		// 	GameObject prefab_root = SimEnvironment.check_in_prefab("Stability test"); if (prefab_root == null) return;
+		// 	AircraftData aircraft = AircraftUtils.get_data_from_prefab(prefab_root); AircraftPhysics physics = aircraft.physics;
 
-			Simulation.SimResults results = Simulation.aircraft_forces(aircraft, 100, 50, 5 * Mathf.Deg2Rad, 0);
-			Debug.Log($"Aircraft mass: {physics.dry_mass}, CG: {physics.dry_cg}");
-			Debug.Log($"Total force: {results.total}, lift: {results.lift}, drag: {results.drag}");
-			Debug.Log($"Lift/weight: {results.lift / (physics.dry_mass * Constants.G)}");
-			Debug.Log($"Aerodynamic torque: {results.torque}");
-		}
+		// 	Simulation.SimResults results = Simulation.aircraft_forces(aircraft, 100, 50, 5 * Mathf.Deg2Rad, 0);
+		// 	Debug.Log($"Aircraft mass: {physics.dry_mass}, CG: {physics.dry_cg}");
+		// 	Debug.Log($"Total force: {results.total}, lift: {results.lift}, drag: {results.drag}");
+		// 	Debug.Log($"Lift/weight: {results.lift / (physics.dry_mass * Constants.G)}");
+		// 	Debug.Log($"Aerodynamic torque: {results.torque}");
+		// }
 	}
 }
 
