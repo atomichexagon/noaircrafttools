@@ -1,6 +1,6 @@
 # Nuclear Option Aircraft Tools
 Tools for evaluating aircraft for use in Nuclear Option.
-This will not build your mod - for that you'll need [Blueprinter](https://github.com/nikkorap/NOBlueprinter-Editor)!
+This will not build your mod - for that you'll need [Blueprinter](https://github.com/nikkorap/NOBlueprinter-Editor).
 
 ## Requirements
 - Unity 2022.3.62f2
