@@ -17,7 +17,7 @@ In a Unity project where Blueprinter has already been installed:
 
 1. In topbar: *Window -> Package Manager*
 2. Click *+ > Add package from git URL...*
-3. Point it to 'https://github.com/atomichexagon/blueprinter-tools.git'
+3. Point it to 'https://github.com/atomichexagon/noaircrafttools.git'
 
 ## Usage
 
