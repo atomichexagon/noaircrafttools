@@ -257,6 +257,13 @@ namespace NOAircraftTools.Validator
 			// Pilots
 			var pilots = find_prop(ser_aircraft, "pilots");
 			results.info("Aircraft", "pilots", pilots.arraySize == 0, "must have at least one pilot (i think)", prefab);
+			
+			for (int i = 0; i < pilots.arraySize; i++)
+			{
+				GameObject pilot = get_element<GameObject>(pilots, i);
+				results.critical("Aircraft", $"pilots.Array.data[{i}]", pilot == null, $"Pilot {i} is null", prefab);
+				if (pilot == null) return results;
+			}
 
 			// duplicate name checker
 			var dupes = prefab.GetComponentsInChildren<Transform>(true)
