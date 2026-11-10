@@ -2,15 +2,16 @@
 Tools for evaluating aircraft for use in Nuclear Option.
 This will not build your mod - for that you'll need [Blueprinter](https://github.com/nikkorap/NOBlueprinter-Editor).
 
+## Features
+- Aircraft validator, to check the game's many footguns before ever building the mod
+	- Currently only checks basic cases, e.g. Definition, Parameters, AeroParts
+- Wind tunnel, to analyze an aircraft's behavior in the editor
+
 ## Requirements
 - Unity 2022.3.62f2
 - Blueprinter (see link above, set that up before doing anything here)
 - The ability to read
 - If you plan to contribute, a lot of patience. Codebase is *rough*
-
-## Features
-- (WIP) Aircraft validator, to check the game's many footguns before ever building the mod
-- (WIP) Wind tunnel, to analyze an aircraft's behavior in the editor
 
 ## Installation
 In a Unity project where Blueprinter has already been installed:
